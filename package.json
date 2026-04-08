@@ -1,0 +1,35 @@
+{
+  "name": "financial-hub-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for financial data — SEC EDGAR filings, XBRL financials, and FRED economic indicators",
+  "license": "MIT",
+  "author": "ykshah1309",
+  "mcpName": "io.github.ykshah1309/financial-hub-mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ykshah1309/financial-hub-mcp.git"
+  },
+  "type": "module",
+  "bin": {
+    "financial-hub-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5.8.2",
+    "vitest": "^2.1.8"
+  }
+}
