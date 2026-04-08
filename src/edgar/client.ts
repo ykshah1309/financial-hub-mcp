@@ -12,15 +12,18 @@
 
 const BASE = "https://data.sec.gov";
 const EFTS_BASE = "https://efts.sec.gov/LATEST";
-const USER_AGENT =
-  "financial-hub-mcp/1.0 (https://github.com/ykshah1309/financial-hub-mcp)";
+
+function getUserAgent(): string {
+  const email = process.env.SEC_USER_AGENT_EMAIL || "user@example.com";
+  return `financial-hub-mcp/1.0 ${email}`;
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 async function edgarFetch(url: string): Promise<unknown> {
   const res = await fetch(url, {
     headers: {
-      "User-Agent": USER_AGENT,
+      "User-Agent": getUserAgent(),
       Accept: "application/json",
     },
   });

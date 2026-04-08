@@ -22,9 +22,11 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Financial Hub MCP Server running on stdio");
-  console.error("SEC EDGAR tools: no API key required");
   console.error(
-    `FRED tools: ${process.env.FRED_API_KEY ? "API key configured" : "set FRED_API_KEY for economic data"}`
+    `SEC EDGAR: ${process.env.SEC_USER_AGENT_EMAIL ? "configured" : "set SEC_USER_AGENT_EMAIL for best results"}`
+  );
+  console.error(
+    `FRED: ${process.env.FRED_API_KEY ? "API key configured" : "set FRED_API_KEY for economic data"}`
   );
 }
 
