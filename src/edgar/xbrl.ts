@@ -7,7 +7,7 @@
  * value per fiscal period.
  */
 
-import type { XBRLFact } from "./client.js";
+import type { XBRLFact, GaapFacts } from "./client.js";
 
 export interface CleanFact {
   periodEnd: string;
@@ -149,7 +149,7 @@ export function detectTrend(growthRates: Array<{ growthRate: number | null }>): 
  * Returns concept name + latest value + count, not the full time series.
  */
 export function summarizeFacts(
-  gaapFacts: Record<string, any>,
+  gaapFacts: GaapFacts,
   maxConcepts = 50
 ): Array<{ concept: string; label: string; latestValue: number | null; latestPeriod: string; count: number; unit: string }> {
   const entries = Object.entries(gaapFacts);
@@ -162,7 +162,7 @@ export function summarizeFacts(
     const unitKey = concept.units["USD"] ? "USD" : Object.keys(concept.units)[0];
     if (!unitKey) continue;
 
-    const facts: XBRLFact[] = concept.units[unitKey];
+    const facts = concept.units[unitKey];
     if (!facts || facts.length === 0) continue;
 
     const last = facts[facts.length - 1];

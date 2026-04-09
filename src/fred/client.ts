@@ -25,15 +25,20 @@ function getApiKey(): string {
 
 async function fredFetch(endpoint: string, params: Record<string, string>): Promise<unknown> {
   const url = new URL(`${BASE}/${endpoint}`);
-  url.searchParams.set("api_key", getApiKey());
   url.searchParams.set("file_type", "json");
   for (const [k, v] of Object.entries(params)) {
     url.searchParams.set(k, v);
   }
 
-  const res = await fetchWithRetry(url.toString(), {}, fredLimiter);
+  const res = await fetchWithRetry(
+    url.toString(),
+    { headers: { Authorization: `Bearer ${getApiKey()}` } },
+    fredLimiter
+  );
   if (!res.ok) {
-    throw new Error(`FRED API request failed: ${res.status} ${res.statusText}`);
+    // Redact API key from error messages — url no longer contains it,
+    // but defense-in-depth against future changes or header leaks.
+    throw new Error(`FRED API request failed: ${res.status} ${res.statusText} (${endpoint})`);
   }
   return res.json();
 }
@@ -52,7 +57,7 @@ export interface FredSeries {
 
 export interface FredObservation {
   date: string;
-  value: string;
+  value: number;
 }
 
 export interface FredSearchResult {
@@ -69,13 +74,24 @@ export interface FredSearchResult {
  * Search for FRED economic data series.
  */
 export async function searchSeries(query: string, limit: number = 15): Promise<FredSearchResult[]> {
+  const cappedLimit = Math.min(Math.max(1, limit), 100);
+  interface FredSeriesSearchRaw {
+    seriess?: Array<{
+      id: string;
+      title: string;
+      frequency: string;
+      units: string;
+      popularity: number;
+    }>;
+  }
+
   const data = (await fredFetch("series/search", {
     search_text: query,
-    limit: String(limit),
+    limit: String(cappedLimit),
     order_by: "search_rank",
-  })) as any;
+  })) as FredSeriesSearchRaw;
 
-  return (data.seriess ?? []).map((s: any) => ({
+  return (data.seriess ?? []).map((s) => ({
     id: s.id,
     title: s.title,
     frequency: s.frequency,
@@ -93,9 +109,21 @@ export async function getSeriesInfo(seriesId: string): Promise<FredSeries> {
   const cached = fredSeriesCache.get(cacheKey);
   if (cached) return cached as FredSeries;
 
+  interface FredSeriesRaw {
+    seriess?: Array<{
+      id: string;
+      title: string;
+      frequency: string;
+      units: string;
+      seasonal_adjustment: string;
+      last_updated: string;
+      notes?: string;
+    }>;
+  }
+
   const data = (await fredFetch("series", {
     series_id: seriesId,
-  })) as any;
+  })) as FredSeriesRaw;
 
   const s = data.seriess?.[0];
   if (!s) throw new Error(`Series not found: ${seriesId}`);
@@ -136,25 +164,31 @@ export async function getObservations(
   const cached = fredObsCache.get(obsCacheKey);
   if (cached) return cached as { series: FredSeries; observations: FredObservation[] };
 
+  const cappedLimit = Math.min(Math.max(1, limit), 1000);
   const params: Record<string, string> = {
     series_id: seriesId,
     sort_order: "desc",
-    limit: String(limit),
+    limit: String(cappedLimit),
   };
   if (startDate) params.observation_start = startDate;
   if (endDate) params.observation_end = endDate;
 
+  interface FredObservationsRaw {
+    observations?: Array<{ date: string; value: string }>;
+  }
+
   const [info, obsData] = await Promise.all([
     getSeriesInfo(seriesId),
-    fredFetch("series/observations", params) as Promise<any>,
+    fredFetch("series/observations", params) as Promise<FredObservationsRaw>,
   ]);
 
   const observations: FredObservation[] = (obsData.observations ?? [])
-    .filter((o: any) => o.value !== ".")
-    .map((o: any) => ({
+    .filter((o) => o.value !== ".")
+    .map((o) => ({
       date: o.date,
-      value: o.value,
-    }));
+      value: parseFloat(o.value),
+    }))
+    .filter((o) => !isNaN(o.value));
 
   const result = { series: info, observations };
   fredObsCache.set(obsCacheKey, result);

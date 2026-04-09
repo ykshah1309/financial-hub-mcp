@@ -11,7 +11,7 @@
  */
 
 import { edgarLimiter, fetchWithRetry } from "../rate-limiter.js";
-import { factsCache, submissionsCache } from "../cache.js";
+import { factsCache, submissionsCache, tickerCache } from "../cache.js";
 
 const BASE = "https://data.sec.gov";
 const EFTS_BASE = "https://efts.sec.gov/LATEST";
@@ -47,7 +47,44 @@ function padCik(cik: string | number): string {
   return String(cik).padStart(10, "0");
 }
 
-// ── public types ─────────────────────────────────────────────────────────────
+// ── Raw API response types (what SEC EDGAR actually returns) ────────────────
+
+/** Raw shape of submissions/CIK*.json from data.sec.gov */
+export interface EdgarSubmissionRaw {
+  cik: number;
+  entityType: string;
+  name: string;
+  tickers: string[];
+  exchanges: string[];
+  sic: string;
+  sicDescription: string;
+  stateOfIncorporation: string;
+  fiscalYearEnd: string;
+  filings: {
+    recent: {
+      accessionNumber: string[];
+      filingDate: string[];
+      reportDate: string[];
+      form: string[];
+      primaryDocument: string[];
+      primaryDocumentUrl?: string[];
+      primaryDocDescription: string[];
+      items: string[];
+    };
+  };
+}
+
+/** Raw shape of a single XBRL concept within company facts */
+export interface GaapConceptRaw {
+  label?: string;
+  description?: string;
+  units: Record<string, XBRLFact[]>;
+}
+
+/** Top-level gaap facts structure: tag name → concept data */
+export type GaapFacts = Record<string, GaapConceptRaw>;
+
+// ── Public types ─────────────────────────────────────────────────────────────
 
 export interface CompanyTicker {
   cik: number;
@@ -62,6 +99,7 @@ export interface Filing {
   form: string;
   primaryDocument: string;
   primaryDocDescription: string;
+  items: string;
 }
 
 export interface CompanySubmission {
@@ -102,28 +140,47 @@ export interface SearchResult {
   cik: number;
 }
 
+export interface FilingSearchResult {
+  companyName: string;
+  ticker: string;
+  form: string;
+  filingDate: string;
+  description: string;
+}
+
+export interface FilingSearchResponse {
+  results: FilingSearchResult[];
+  total: number;
+}
+
 // ── API functions ────────────────────────────────────────────────────────────
 
 /**
  * Search companies by name or ticker.
  * Uses the company_tickers.json endpoint, filtered client-side.
+ * Ticker data is cached for 24h via TTLCache so new listings appear without restart.
  */
-let tickerCache: CompanyTicker[] | null = null;
+async function loadTickers(): Promise<CompanyTicker[]> {
+  const cached = tickerCache.get("tickers");
+  if (cached) return cached;
+
+  const data = await edgarFetch(
+    "https://www.sec.gov/files/company_tickers.json"
+  ) as Record<string, { cik_str: number; ticker: string; title: string }>;
+  const tickers = Object.values(data).map((entry) => ({
+    cik: entry.cik_str,
+    ticker: entry.ticker,
+    name: entry.title,
+  }));
+  tickerCache.set("tickers", tickers);
+  return tickers;
+}
 
 export async function searchCompanies(query: string): Promise<SearchResult[]> {
-  if (!tickerCache) {
-    const data = (await edgarFetch(
-      "https://www.sec.gov/files/company_tickers.json"
-    )) as Record<string, { cik_str: number; ticker: string; title: string }>;
-    tickerCache = Object.values(data).map((entry) => ({
-      cik: entry.cik_str,
-      ticker: entry.ticker,
-      name: entry.title,
-    }));
-  }
+  const tickers = await loadTickers();
 
   const q = query.toLowerCase();
-  return tickerCache
+  return tickers
     .filter(
       (c) =>
         c.ticker.toLowerCase().includes(q) ||
@@ -145,11 +202,11 @@ export async function getCompanyFilings(
   if (!data) {
     data = (await edgarFetch(
       `${BASE}/submissions/CIK${padCik(cik)}.json`
-    )) as any;
+    )) as EdgarSubmissionRaw;
     submissionsCache.set(cacheKey, data);
   }
 
-  const recent = data.filings?.recent ?? {};
+  const recent = data.filings?.recent ?? {} as EdgarSubmissionRaw["filings"]["recent"];
   const count = recent.accessionNumber?.length ?? 0;
 
   let filings: Filing[] = [];
@@ -161,6 +218,7 @@ export async function getCompanyFilings(
       form: recent.form[i],
       primaryDocument: recent.primaryDocumentUrl?.[i] ?? recent.primaryDocument?.[i] ?? "",
       primaryDocDescription: recent.primaryDocDescription?.[i] ?? "",
+      items: recent.items?.[i] ?? "",
     });
   }
 
@@ -201,7 +259,7 @@ export async function getCompanyConcept(
 ): Promise<CompanyConcept> {
   const data = (await edgarFetch(
     `${BASE}/api/xbrl/companyconcept/CIK${padCik(cik)}/${taxonomy}/${concept}.json`
-  )) as any;
+  )) as CompanyConcept & { label?: string; description?: string };
 
   return {
     cik: data.cik,
@@ -219,14 +277,14 @@ export async function getCompanyConcept(
  */
 export async function getCompanyFacts(
   cik: string | number
-): Promise<Record<string, Record<string, CompanyConcept>>> {
+): Promise<Record<string, GaapFacts>> {
   const cacheKey = `facts:${padCik(cik)}`;
   const cached = factsCache.get(cacheKey);
   if (cached) return cached;
 
   const data = (await edgarFetch(
     `${BASE}/api/xbrl/companyfacts/CIK${padCik(cik)}.json`
-  )) as any;
+  )) as { facts: Record<string, GaapFacts> };
 
   const facts = data.facts ?? {};
   factsCache.set(cacheKey, facts);
@@ -240,23 +298,45 @@ export async function searchFilings(
   query: string,
   forms?: string,
   startDate?: string,
-  endDate?: string
-): Promise<any[]> {
+  endDate?: string,
+  limit: number = 20,
+  offset: number = 0
+): Promise<FilingSearchResponse> {
+  const cappedLimit = Math.min(Math.max(1, limit), 50);
   const params = new URLSearchParams({ q: query });
   if (forms) params.set("forms", forms);
   if (startDate) params.set("startdt", startDate);
   if (endDate) params.set("enddt", endDate);
+  params.set("from", String(Math.max(0, offset)));
+
+  interface EftsHit {
+    _source: {
+      company_name?: string;
+      ticker?: string;
+      form_type?: string;
+      file_date?: string;
+      file_description?: string;
+    };
+  }
+  interface EftsResponse {
+    hits?: { hits?: EftsHit[]; total?: { value?: number } };
+  }
 
   const data = (await edgarFetch(
     `${EFTS_BASE}/search-index?${params.toString()}`
-  )) as any;
+  )) as EftsResponse;
 
   const hits = data.hits?.hits ?? [];
-  return hits.slice(0, 20).map((hit: any) => ({
-    companyName: hit._source?.company_name ?? "",
-    ticker: hit._source?.ticker ?? "",
-    form: hit._source?.form_type ?? "",
-    filingDate: hit._source?.file_date ?? "",
-    description: hit._source?.file_description ?? "",
-  }));
+  const total = data.hits?.total?.value ?? 0;
+
+  return {
+    results: hits.slice(0, cappedLimit).map((hit) => ({
+      companyName: hit._source?.company_name ?? "",
+      ticker: hit._source?.ticker ?? "",
+      form: hit._source?.form_type ?? "",
+      filingDate: hit._source?.file_date ?? "",
+      description: hit._source?.file_description ?? "",
+    })),
+    total,
+  };
 }

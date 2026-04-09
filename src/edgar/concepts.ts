@@ -9,6 +9,8 @@
  * so callers don't need to know which tag a specific company uses.
  */
 
+import type { GaapFacts, XBRLFact } from "./client.js";
+
 export interface ConceptGroup {
   /** User-friendly canonical name */
   canonical: string;
@@ -289,9 +291,9 @@ export function resolveConcept(input: string): { tags: string[]; label: string; 
  * from a concept group and return its data.
  */
 export function findConceptData(
-  gaapFacts: Record<string, any>,
+  gaapFacts: GaapFacts,
   conceptInput: string
-): { tag: string; label: string; unit: string; facts: any[] } | null {
+): { tag: string; label: string; unit: string; facts: XBRLFact[] } | null {
   const { tags, label } = resolveConcept(conceptInput);
 
   for (const tag of tags) {

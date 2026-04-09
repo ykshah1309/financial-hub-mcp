@@ -18,16 +18,17 @@ FRED (Federal Reserve Economic Data) provides 800,000+ time series from 100+ sou
 
 ### Caching
 
-In-memory TTL cache reduces redundant API calls:
+In-memory LRU cache with TTL expiry reduces redundant API calls:
 
 | Cache | TTL | Max Entries | Payload Size |
 |-------|-----|-------------|-------------|
-| Company facts | 1 hour | 15 | 20-50 MB each |
+| Company facts | 1 hour | 10 | 20-50 MB each |
 | Company submissions | 1 hour | 30 | ~50 KB each |
+| Company tickers | 24 hours | 1 | ~3 MB |
 | FRED series metadata | 6 hours | 100 | ~1 KB each |
 | FRED observations | 1 hour | 50 | ~5 KB each |
 
-Entries are proactively swept on every write to prevent memory buildup from lazy-only deletion.
+Eviction is LRU — frequently accessed entries are promoted on read, so the least recently used entry is evicted when capacity is full. Expired entries are proactively swept on every write.
 
 ## API
 
@@ -88,12 +89,15 @@ Entries are proactively swept on every write to prevent memory buildup from lazy
   - Individual company failures are isolated — partial comparisons still return
 
 - **search_filings**
-  - Full-text search across all SEC EDGAR filings
+  - Full-text search across all SEC EDGAR filings with pagination
   - Inputs:
     - `query` (string): Search terms
     - `forms` (string, optional): Comma-separated form types
     - `startDate` (string, optional): YYYY-MM-DD
     - `endDate` (string, optional): YYYY-MM-DD
+    - `limit` (number, optional): Results per page (default 20, max 50)
+    - `offset` (number, optional): Skip N results for pagination
+  - Returns results array + total hit count for pagination
   - Searches the full text of any filing since 2001
 
 - **search_economic_data**

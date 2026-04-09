@@ -33,6 +33,7 @@ export function registerFredTools(server: McpServer): void {
       inputSchema: {
         query: z
           .string()
+          .min(1)
           .describe(
             "Search terms (e.g. 'GDP', 'unemployment rate', 'consumer price index')"
           ),
@@ -65,13 +66,16 @@ export function registerFredTools(server: McpServer): void {
       inputSchema: {
         seriesId: z
           .string()
+          .min(1)
           .describe("FRED series ID (e.g. GDP, UNRATE, CPIAUCSL)"),
         startDate: z
           .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format")
           .optional()
           .describe("Start date in YYYY-MM-DD format"),
         endDate: z
           .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format")
           .optional()
           .describe("End date in YYYY-MM-DD format"),
       },

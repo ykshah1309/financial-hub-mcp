@@ -8,7 +8,7 @@
  *  - Cross-company normalized comparison
  */
 
-import { getCompanyFacts, type XBRLFact } from "./client.js";
+import { getCompanyFacts, type GaapFacts } from "./client.js";
 import { deduplicateFacts, annualOnly, computeGrowth, detectTrend, type CleanFact } from "./xbrl.js";
 import { findConceptData } from "./concepts.js";
 
@@ -77,7 +77,7 @@ function cagr(startVal: number, endVal: number, years: number): number | null {
   return Math.pow(endVal / startVal, 1 / years) - 1;
 }
 
-function extractLatest(gaap: Record<string, any>, concept: string): MetricSnapshot | null {
+function extractLatest(gaap: GaapFacts, concept: string): MetricSnapshot | null {
   const found = findConceptData(gaap, concept);
   if (!found) return null;
   const deduped = deduplicateFacts(found.facts);
@@ -87,7 +87,7 @@ function extractLatest(gaap: Record<string, any>, concept: string): MetricSnapsh
   return { value: last.value, formatted: fmt(last.value), period: last.periodEnd, fiscalYear: last.fiscalYear };
 }
 
-function buildGrowthAnalysis(gaap: Record<string, any>, concept: string): GrowthAnalysis | null {
+function buildGrowthAnalysis(gaap: GaapFacts, concept: string): GrowthAnalysis | null {
   const found = findConceptData(gaap, concept);
   if (!found) return null;
 

@@ -405,7 +405,8 @@ export function registerEdgarTools(server: McpServer): void {
       title: "Search SEC Filings",
       description:
         "Full-text search across all SEC EDGAR filings. " +
-        "Search for keywords in filing documents, optionally filtered by form type and date range.",
+        "Search for keywords in filing documents, optionally filtered by form type and date range. " +
+        "Supports pagination — use offset to fetch subsequent pages.",
       inputSchema: {
         query: z.string().describe("Search terms to find in filings"),
         forms: z
@@ -420,13 +421,23 @@ export function registerEdgarTools(server: McpServer): void {
           .string()
           .optional()
           .describe("End date in YYYY-MM-DD format"),
+        limit: z
+          .number()
+          .optional()
+          .default(20)
+          .describe("Results per page (default 20, max 50)"),
+        offset: z
+          .number()
+          .optional()
+          .default(0)
+          .describe("Number of results to skip for pagination"),
       },
       annotations: ANNOTATIONS,
     },
-    async ({ query, forms, startDate, endDate }) => {
+    async ({ query, forms, startDate, endDate, limit, offset }) => {
       try {
-        const results = await searchFilings(query, forms, startDate, endDate);
-        return { content: [{ type: "text" as const, text: compactJson(results) }] };
+        const response = await searchFilings(query, forms, startDate, endDate, limit, offset);
+        return { content: [{ type: "text" as const, text: compactJson(response) }] };
       } catch (err) {
         return errorResult(err);
       }

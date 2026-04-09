@@ -35,44 +35,63 @@ export function registerEdgarResources(server: McpServer): void {
       mimeType: "application/json",
     },
     async (uri: URL, variables: Record<string, string | string[]>) => {
-      const ticker = String(variables.ticker);
-      const matches = await searchCompanies(ticker);
-      if (matches.length === 0) {
+      try {
+        const ticker = String(variables.ticker);
+        const matches = await searchCompanies(ticker);
+        if (matches.length === 0) {
+          return {
+            contents: [
+              {
+                uri: uri.href,
+                mimeType: "application/json",
+                text: JSON.stringify({
+                  status: "not_found",
+                  message: `No SEC-registered company found for ticker: ${ticker}`,
+                }),
+              },
+            ],
+          };
+        }
+
+        const company = matches[0];
+        const submission = await getCompanyFilings(company.cik);
+
+        const profile = {
+          name: submission.name,
+          cik: submission.cik,
+          tickers: submission.tickers,
+          exchanges: submission.exchanges,
+          sic: submission.sic,
+          sicDescription: submission.sicDescription,
+          stateOfIncorporation: submission.stateOfIncorporation,
+          fiscalYearEnd: submission.fiscalYearEnd,
+          recentFilings: submission.filings.slice(0, 10),
+        };
+
         return {
           contents: [
             {
               uri: uri.href,
               mimeType: "application/json",
-              text: JSON.stringify({ error: `No company found for ticker: ${ticker}` }),
+              text: JSON.stringify(profile),
+            },
+          ],
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          contents: [
+            {
+              uri: uri.href,
+              mimeType: "application/json",
+              text: JSON.stringify({
+                status: "error",
+                message: `Failed to fetch company profile: ${message}`,
+              }),
             },
           ],
         };
       }
-
-      const company = matches[0];
-      const submission = await getCompanyFilings(company.cik);
-
-      const profile = {
-        name: submission.name,
-        cik: submission.cik,
-        tickers: submission.tickers,
-        exchanges: submission.exchanges,
-        sic: submission.sic,
-        sicDescription: submission.sicDescription,
-        stateOfIncorporation: submission.stateOfIncorporation,
-        fiscalYearEnd: submission.fiscalYearEnd,
-        recentFilings: submission.filings.slice(0, 10),
-      };
-
-      return {
-        contents: [
-          {
-            uri: uri.href,
-            mimeType: "application/json",
-            text: JSON.stringify(profile),
-          },
-        ],
-      };
     }
   );
 }

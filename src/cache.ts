@@ -1,9 +1,13 @@
 /**
- * In-memory TTL cache with bounded size and proactive eviction.
+ * In-memory LRU cache with TTL-based expiry and bounded size.
  *
  * SEC company facts payloads can be 20-50MB each. Caching 200 of them
  * would OOM any Node process. This cache enforces strict entry limits
  * and sweeps expired entries on every write to prevent memory buildup.
+ *
+ * Eviction is LRU: get() promotes accessed entries to most-recent position
+ * via Map delete-and-reinsert. When at capacity, the least recently used
+ * (first key in iteration order) is evicted.
  */
 
 interface CacheEntry<T> {
@@ -32,6 +36,11 @@ export class TTLCache<T> {
       this.store.delete(key);
       return undefined;
     }
+    // LRU promotion: delete and re-insert moves key to end of Map iteration order.
+    // This ensures eviction (which takes the first key) always removes the
+    // least recently used entry, not the oldest inserted one.
+    this.store.delete(key);
+    this.store.set(key, entry);
     return entry.value;
   }
 
@@ -75,11 +84,14 @@ export class TTLCache<T> {
 // ── Shared cache instances ──────────────────────────────────────────────────
 // Sizes are deliberately small for heavy payloads to prevent OOM.
 
-/** Company facts: 1h TTL, max 15 entries (~20-50MB each, 15 = ~300-750MB worst case) */
-export const factsCache = new TTLCache<any>(3600, 15);
+/** Company facts: 1h TTL, max 10 entries (~20-50MB each, 10 = ~200-500MB worst case) */
+export const factsCache = new TTLCache<any>(3600, 10);
 
 /** Company submissions: 1h TTL, max 30 entries (~50KB each, negligible) */
 export const submissionsCache = new TTLCache<any>(3600, 30);
+
+/** Company tickers: 24h TTL, single entry (~3MB). Refreshes daily so new listings appear. */
+export const tickerCache = new TTLCache<any>(86400, 1);
 
 /** FRED series metadata: 6h TTL, max 100 entries (~1KB each) */
 export const fredSeriesCache = new TTLCache<any>(21600, 100);
