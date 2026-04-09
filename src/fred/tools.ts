@@ -2,6 +2,22 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { searchSeries, getObservations } from "./client.js";
 
+const ANNOTATIONS = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: true,
+} as const;
+
+/** MCP-compliant error response with isError flag. */
+function errorResult(err: unknown): { content: Array<{ type: "text"; text: string }>; isError: true } {
+  const message = err instanceof Error ? err.message : String(err);
+  return {
+    content: [{ type: "text" as const, text: message }],
+    isError: true,
+  };
+}
+
 export function registerFredTools(server: McpServer): void {
   // ── search_economic_data ─────────────────────────────────────────────────
 
@@ -21,20 +37,15 @@ export function registerFredTools(server: McpServer): void {
             "Search terms (e.g. 'GDP', 'unemployment rate', 'consumer price index')"
           ),
       },
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
-      },
+      annotations: ANNOTATIONS,
     },
     async ({ query }) => {
-      const results = await searchSeries(query);
-      return {
-        content: [
-          { type: "text" as const, text: JSON.stringify(results, null, 2) },
-        ],
-      };
+      try {
+        const results = await searchSeries(query);
+        return { content: [{ type: "text" as const, text: JSON.stringify(results) }] };
+      } catch (err) {
+        return errorResult(err);
+      }
     }
   );
 
@@ -64,20 +75,15 @@ export function registerFredTools(server: McpServer): void {
           .optional()
           .describe("End date in YYYY-MM-DD format"),
       },
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
-      },
+      annotations: ANNOTATIONS,
     },
     async ({ seriesId, startDate, endDate }) => {
-      const data = await getObservations(seriesId, startDate, endDate);
-      return {
-        content: [
-          { type: "text" as const, text: JSON.stringify(data, null, 2) },
-        ],
-      };
+      try {
+        const data = await getObservations(seriesId, startDate, endDate);
+        return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
+      } catch (err) {
+        return errorResult(err);
+      }
     }
   );
 }

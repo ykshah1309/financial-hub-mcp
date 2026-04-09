@@ -43,7 +43,7 @@ export function registerEdgarResources(server: McpServer): void {
             {
               uri: uri.href,
               mimeType: "application/json",
-              text: JSON.stringify({ error: `No company found for ticker: ${ticker}` }, null, 2),
+              text: JSON.stringify({ error: `No company found for ticker: ${ticker}` }),
             },
           ],
         };
@@ -69,7 +69,7 @@ export function registerEdgarResources(server: McpServer): void {
           {
             uri: uri.href,
             mimeType: "application/json",
-            text: JSON.stringify(profile, null, 2),
+            text: JSON.stringify(profile),
           },
         ],
       };

@@ -283,7 +283,19 @@ export interface CompanyComparison {
 }
 
 export async function compareCompanies(ciks: string[]): Promise<CompanyComparison> {
-  const analyses = await Promise.all(ciks.map((cik) => analyzeCompany(cik)));
+  if (ciks.length === 0) {
+    return { companies: [], winner: { byRevenue: null, byProfitability: null, byGrowth: null, byHealthScore: null } };
+  }
+
+  // Use allSettled to handle individual company failures gracefully
+  const results = await Promise.allSettled(ciks.map((cik) => analyzeCompany(cik)));
+  const analyses = results
+    .filter((r): r is PromiseFulfilledResult<CompanyAnalysis> => r.status === "fulfilled")
+    .map((r) => r.value);
+
+  if (analyses.length === 0) {
+    return { companies: [], winner: { byRevenue: null, byProfitability: null, byGrowth: null, byHealthScore: null } };
+  }
 
   const companies = analyses.map((a) => ({
     cik: a.cik,
@@ -305,21 +317,22 @@ export async function compareCompanies(ciks: string[]): Promise<CompanyCompariso
     healthScore: a.healthScore.score,
   }));
 
-  // Determine winners
-  const byRevenue = analyses.reduce((best, a) =>
-    (a.metrics.revenue?.value ?? 0) > (best.metrics.revenue?.value ?? 0) ? a : best
+  // Safe reduce with initial value — never throws on empty arrays
+  const byRevenue = analyses.reduce<CompanyAnalysis | null>((best, a) =>
+    !best || (a.metrics.revenue?.value ?? 0) > (best.metrics.revenue?.value ?? 0) ? a : best, null
   );
-  const byProfit = analyses.reduce((best, a) =>
-    (a.metrics.netIncome?.value ?? -Infinity) > (best.metrics.netIncome?.value ?? -Infinity) ? a : best
+  const byProfit = analyses.reduce<CompanyAnalysis | null>((best, a) =>
+    !best || (a.metrics.netIncome?.value ?? -Infinity) > (best.metrics.netIncome?.value ?? -Infinity) ? a : best, null
   );
-  const byHealth = analyses.reduce((best, a) =>
-    a.healthScore.score > best.healthScore.score ? a : best
+  const byHealth = analyses.reduce<CompanyAnalysis | null>((best, a) =>
+    !best || a.healthScore.score > best.healthScore.score ? a : best, null
   );
 
   let byGrowthCik: string | null = null;
   const growthValues = analyses
     .filter((a) => a.growth.revenue?.oneYearGrowth)
-    .map((a) => ({ cik: a.cik, growth: parseFloat(a.growth.revenue!.oneYearGrowth!) }));
+    .map((a) => ({ cik: a.cik, growth: parseFloat(a.growth.revenue!.oneYearGrowth!) }))
+    .filter((g) => !isNaN(g.growth));
   if (growthValues.length > 0) {
     byGrowthCik = growthValues.reduce((best, g) => g.growth > best.growth ? g : best).cik;
   }
@@ -327,10 +340,10 @@ export async function compareCompanies(ciks: string[]): Promise<CompanyCompariso
   return {
     companies,
     winner: {
-      byRevenue: byRevenue.cik,
-      byProfitability: byProfit.cik,
+      byRevenue: byRevenue?.cik ?? null,
+      byProfitability: byProfit?.cik ?? null,
       byGrowth: byGrowthCik,
-      byHealthScore: byHealth.cik,
+      byHealthScore: byHealth?.cik ?? null,
     },
   };
 }

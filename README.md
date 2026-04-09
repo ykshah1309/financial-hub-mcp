@@ -1,240 +1,153 @@
-# Financial Hub MCP Server
+# MCP Registry
 
-A TypeScript MCP server for financial data aggregation — SEC EDGAR filings, XBRL financial statements, and FRED economic indicators. Connect any MCP-compatible AI assistant to real-time financial and economic data with zero cost.
+The MCP registry provides MCP clients with a list of MCP servers, like an app store for MCP servers.
 
-## Features
+[**📤 Publish my MCP server**](docs/modelcontextprotocol-io/quickstart.mdx) | [**⚡️ Live API docs**](https://registry.modelcontextprotocol.io/docs) | [**👀 Ecosystem vision**](docs/design/ecosystem-vision.md) | 📖 **[Full documentation](./docs)**
 
-- Search SEC-registered companies by name or ticker
-- Retrieve SEC filings (10-K, 10-Q, 8-K, DEF 14A, etc.)
-- Pull structured XBRL financial data (revenue, income, assets, EPS, etc.)
-- **Smart XBRL normalization** — automatically resolves concept aliases across companies (e.g. `revenue` finds data whether a company uses `Revenues`, `RevenueFromContractWithCustomerExcludingAssessedTax`, or `SalesRevenueNet`)
-- **Fact deduplication** — removes duplicate values from overlapping 10-K/10-Q filings and amendments, returning one clean value per fiscal period
-- **Computed financial ratios** — profit margin, ROE, ROA, debt-to-equity, current ratio
-- **Growth analysis** — YoY growth rates, 3-year and 5-year CAGR, trend detection
-- **Health scoring** — composite A-F grade based on profitability, leverage, liquidity, and growth
-- **Cross-company comparison** — side-by-side normalized metrics for 2-5 companies
-- Full-text search across all SEC EDGAR filings since 2001
-- Search 800,000+ FRED economic time series
-- Retrieve economic indicators (GDP, CPI, unemployment, interest rates)
-- **Rate limiting** — built-in token-bucket rate limiter with request queuing prevents SEC (10 req/s) and FRED (120 req/min) bans
-- **Intelligent caching** — in-memory TTL cache reduces redundant API calls
-- MCP Resources for browsable company profiles
-- MCP Prompts for guided financial analysis workflows
-- Tool annotations on every tool
+## Development Status
 
-## Data Sources
+**2025-10-24 update**: The Registry API has entered an **API freeze (v0.1)** 🎉. For the next month or more, the API will remain stable with no breaking changes, allowing integrators to confidently implement support. This freeze applies to v0.1 while development continues on v0. We'll use this period to validate the API in real-world integrations and gather feedback to shape v1 for general availability. Thank you to everyone for your contributions and patience—your involvement has been key to getting us here!
 
-### SEC EDGAR (No API key required)
+**2025-09-08 update**: The registry has launched in preview 🎉 ([announcement blog post](https://blog.modelcontextprotocol.io/posts/2025-09-08-mcp-registry-preview/)). While the system is now more stable, this is still a preview release and breaking changes or data resets may occur. A general availability (GA) release will follow later. We'd love your feedback in [GitHub discussions](https://github.com/modelcontextprotocol/registry/discussions/new?category=ideas) or in the [#registry-dev Discord](https://discord.com/channels/1358869848138059966/1369487942862504016) ([joining details here](https://modelcontextprotocol.io/community/communication)).
 
-All SEC EDGAR data comes directly from the SEC's free public APIs at `data.sec.gov`. No authentication needed — just a User-Agent with an email address (set via `SEC_USER_AGENT_EMAIL`).
+Current key maintainers:
+- **Adam Jones** (Anthropic) [@domdomegg](https://github.com/domdomegg)  
+- **Tadas Antanavicius** (PulseMCP) [@tadasant](https://github.com/tadasant)
+- **Toby Padilla** (GitHub) [@toby](https://github.com/toby)
+- **Radoslav (Rado) Dimitrov** (Stacklok) [@rdimitrov](https://github.com/rdimitrov)
 
-**Rate limit**: 10 requests/second (enforced by SEC).
+## Contributing
 
-### FRED (Free API key)
+We use multiple channels for collaboration - see [modelcontextprotocol.io/community/communication](https://modelcontextprotocol.io/community/communication).
 
-FRED (Federal Reserve Economic Data) provides 800,000+ time series from 100+ sources. A free API key is required — get one instantly at [fred.stlouisfed.org](https://fred.stlouisfed.org/docs/api/api_key.html).
+Often (but not always) ideas flow through this pipeline:
 
-**Rate limit**: 120 requests/minute.
+- **[Discord](https://modelcontextprotocol.io/community/communication)** - Real-time community discussions
+- **[Discussions](https://github.com/modelcontextprotocol/registry/discussions)** - Propose and discuss product/technical requirements
+- **[Issues](https://github.com/modelcontextprotocol/registry/issues)** - Track well-scoped technical work  
+- **[Pull Requests](https://github.com/modelcontextprotocol/registry/pulls)** - Contribute work towards issues
 
-## API
+### Quick start:
 
-### Tools
+#### Pre-requisites
 
-- **search_companies**
-  - Search SEC-registered companies by name or ticker
-  - Input: `query` (string)
-  - Returns matching company names, tickers, and CIK numbers
+- **Docker**
+- **Go 1.24.x**
+- **ko** - Container image builder for Go ([installation instructions](https://ko.build/install/))
+- **golangci-lint v2.4.0**
 
-- **get_company_filings**
-  - Get recent SEC filings for a company
-  - Input: `cik` (string), `formType` (optional string)
-  - Returns filing metadata: form type, dates, document links
-  - Filter by form type (10-K, 10-Q, 8-K, DEF 14A, etc.)
+#### Running the server
 
-- **get_financial_metric**
-  - Get deduplicated historical values of a financial metric with trend analysis
-  - Input: `cik` (string), `concept` (string), `taxonomy` (optional), `annualOnly` (optional boolean)
-  - Accepts friendly names (`revenue`, `net_income`, `eps`, `cash`, `total_assets`) or raw XBRL tags
-  - Automatically resolves concept aliases — finds the right tag regardless of which one a company uses
-  - Returns deduplicated values (one per fiscal period), YoY growth rates, and trend direction
-
-- **get_financial_summary**
-  - Get a comprehensive financial snapshot with computed ratios
-  - Input: `cik` (string)
-  - Returns latest metrics: revenue, net income, assets, liabilities, equity, cash, debt, EPS, operating cash flow, free cash flow
-  - Computed ratios: profit margin, debt-to-equity, current ratio, ROE, ROA
-  - All values deduplicated from the most recent annual filing
-
-- **get_company_facts_summary**
-  - Get a compact index of all available XBRL data for a company
-  - Input: `cik` (string), `limit` (optional, default 40)
-  - Returns concept names, latest values, and data point counts — not the full time series
-  - Use this to discover what data is available before drilling into specific metrics
-
-- **analyze_financials**
-  - Deep financial analysis with computed ratios, growth metrics, and health scoring
-  - Input: `cik` (string)
-  - Returns profit margins, ROE, ROA, debt-to-equity, current ratio
-  - Revenue/income/EPS growth with CAGR and trend detection
-  - Composite health grade (A-F) with explanatory factors
-
-- **compare_companies**
-  - Side-by-side financial comparison of 2-5 companies
-  - Input: `ciks` (string array, 2-5 CIKs)
-  - Compares revenue, income, assets, cash, ratios, and health scores
-  - Identifies the winner in each category
-
-- **search_filings**
-  - Full-text search across all SEC EDGAR filings
-  - Input: `query` (string), `forms` (optional), `startDate` (optional), `endDate` (optional)
-  - Search for keywords in the full text of any filing since 2001
-
-- **search_economic_data**
-  - Search the FRED database for economic data series
-  - Input: `query` (string)
-  - Returns series IDs, titles, frequencies, and units
-  - Use returned series IDs with `get_economic_data`
-
-- **get_economic_data**
-  - Get time series observations for a FRED economic data series
-  - Input: `seriesId` (string), `startDate` (optional), `endDate` (optional)
-  - Common series: `GDP`, `CPIAUCSL` (CPI), `UNRATE` (unemployment), `FEDFUNDS`, `DGS10` (10-year treasury), `SP500`, `MORTGAGE30US`
-  - Returns series metadata and recent observations
-
-### Resources
-
-- **sec://company/{ticker}**
-  - Company profile with SEC metadata and recent filings
-  - Includes: name, CIK, tickers, exchanges, SIC code, fiscal year end, and the 10 most recent filings
-  - Browsable from any MCP client that supports resources
-
-### Prompts
-
-- **financial_analysis**
-  - Guided company financial health analysis
-  - Input: `ticker` (string)
-  - Walks through revenue trends, profitability, balance sheet health, and risk assessment
-
-- **peer_comparison**
-  - Side-by-side comparison of two companies
-  - Input: `ticker1` (string), `ticker2` (string)
-  - Compares revenue, income, assets, liabilities, cash, and EPS
-
-- **economic_overview**
-  - Current US economic conditions dashboard
-  - No input required
-  - Pulls GDP, unemployment, CPI, fed funds rate, treasury yields, and mortgage rates
-
-### Tool Annotations
-
-All tools include MCP ToolAnnotations for safe agent composition:
-
-| Hint | Value | Reason |
-|------|-------|--------|
-| `readOnlyHint` | `true` | All tools are read-only — no data is modified |
-| `destructiveHint` | `false` | No data destruction |
-| `idempotentHint` | `true` | Same inputs produce same outputs |
-| `openWorldHint` | `true` | All tools make external API calls |
-
-## Usage with Claude Desktop
-
-Add to your `claude_desktop_config.json`:
-
-### NPX
-
-```json
-{
-  "mcpServers": {
-    "financial-hub": {
-      "command": "npx",
-      "args": ["-y", "financial-hub-mcp"],
-      "env": {
-        "FRED_API_KEY": "your-free-api-key",
-        "SEC_USER_AGENT_EMAIL": "your-email@example.com"
-      }
-    }
-  }
-}
+```bash
+# Start full development environment
+make dev-compose
 ```
 
-## VS Code Installation
+This starts the registry at [`localhost:8080`](http://localhost:8080) with PostgreSQL. The database uses ephemeral storage and is reset each time you restart the containers, ensuring a clean state for development and testing.
 
-Add the configuration to your user-level MCP configuration file. Open the Command Palette (`Ctrl + Shift + P`) and run `MCP: Open User Configuration`, then add:
+**Note:** The registry uses [ko](https://ko.build) to build container images. The `make dev-compose` command automatically builds the registry image with ko and loads it into your local Docker daemon before starting the services.
 
-### NPX
+By default, the registry seeds from the production API with a filtered subset of servers (to keep startup fast). This ensures your local environment mirrors production behavior and all seed data passes validation. For offline development you can seed from a file without validation with `MCP_REGISTRY_SEED_FROM=data/seed.json MCP_REGISTRY_ENABLE_REGISTRY_VALIDATION=false make dev-compose`.
 
-```json
-{
-  "servers": {
-    "financial-hub": {
-      "command": "npx",
-      "args": ["-y", "financial-hub-mcp"],
-      "env": {
-        "FRED_API_KEY": "your-free-api-key",
-        "SEC_USER_AGENT_EMAIL": "your-email@example.com"
-      }
-    }
-  }
-}
+The setup can be configured with environment variables in [docker-compose.yml](./docker-compose.yml) - see [.env.example](./.env.example) for a reference.
+
+<details>
+<summary>Alternative: Running a pre-built Docker image</summary>
+
+Pre-built Docker images are automatically published to GitHub Container Registry:
+
+```bash
+# Run latest stable release
+docker run -p 8080:8080 ghcr.io/modelcontextprotocol/registry:latest
+
+# Run latest from main branch (continuous deployment)
+docker run -p 8080:8080 ghcr.io/modelcontextprotocol/registry:main
+
+# Run specific release version
+docker run -p 8080:8080 ghcr.io/modelcontextprotocol/registry:v1.0.0
+
+# Run development build from main branch
+docker run -p 8080:8080 ghcr.io/modelcontextprotocol/registry:main-20250906-abc123d
 ```
 
-> For more details about MCP configuration in VS Code, see the [official VS Code MCP documentation](https://code.visualstudio.com/docs/copilot/customization/mcp-servers).
+**Available tags:** 
+- **Releases**: `latest`, `v1.0.0`, `v1.1.0`, etc.
+- **Continuous**: `main` (latest main branch build)
+- **Development**: `main-<date>-<sha>` (specific commit builds)
 
-## Environment Variables
+</details>
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `FRED_API_KEY` | For FRED tools | Free 32-character key from [fred.stlouisfed.org](https://fred.stlouisfed.org/docs/api/api_key.html) |
-| `SEC_USER_AGENT_EMAIL` | Recommended | Your email address for SEC EDGAR API compliance. Falls back to `user@example.com` if not set. |
+#### Publishing a server
 
-SEC EDGAR tools work without any API key. The email in the User-Agent header is required by SEC policy for fair access.
+To publish a server, we've built a simple CLI. You can use it with:
+
+```bash
+# Build the latest CLI
+make publisher
+
+# Use it!
+./bin/mcp-publisher --help
+```
+
+See [the publisher guide](./docs/modelcontextprotocol-io/quickstart.mdx) for more details.
+
+#### Other commands
+
+```bash
+# Run lint, unit tests and integration tests
+make check
+```
+
+There are also a few more helpful commands for development. Run `make help` to learn more, or look in [Makefile](./Makefile).
+
+<!--
+For Claude and other AI tools: Always prefer make targets over custom commands where possible.
+-->
 
 ## Architecture
 
+### Project Structure
+
 ```
-src/
-├── index.ts              # MCP server entry point
-├── rate-limiter.ts       # Token-bucket rate limiter with retry/backoff
-├── cache.ts              # In-memory TTL cache (facts, submissions, FRED data)
-├── edgar/
-│   ├── client.ts         # SEC EDGAR HTTP client (rate-limited, cached)
-│   ├── tools.ts          # MCP tool registrations (10 tools)
-│   ├── resources.ts      # MCP resource templates (company profiles)
-│   ├── xbrl.ts           # XBRL fact deduplication, growth, trend detection
-│   ├── concepts.ts       # Concept alias normalization (20+ financial concepts)
-│   └── analytics.ts      # Computed ratios, health scoring, company comparison
-├── fred/
-│   ├── client.ts         # FRED HTTP client (rate-limited, cached)
-│   └── tools.ts          # FRED MCP tool registrations
-└── prompts.ts            # Financial analysis prompt templates
-```
-
-### Data Pipeline
-
-Raw XBRL data from SEC EDGAR goes through several processing stages:
-
-1. **Rate-limited fetch** — Token bucket ensures SEC's 10 req/s limit is never exceeded
-2. **Caching** — Company facts cached for 1 hour to avoid redundant requests
-3. **Concept resolution** — Friendly names like `revenue` are mapped to all known XBRL tag variants
-4. **Deduplication** — Overlapping 10-K/10-Q/amendment values are collapsed to one per fiscal period
-5. **Analysis** — Growth rates, CAGR, financial ratios, and health scores are computed
-6. **Formatting** — Large numbers formatted (e.g. `1.23B`), responses capped to control context window usage
-
-## Building from Source
-
-```bash
-git clone https://github.com/ykshah1309/financial-hub-mcp.git
-cd financial-hub-mcp
-npm install
-npm run build
+├── cmd/                     # Application entry points
+│   └── publisher/           # Server publishing tool
+├── data/                    # Seed data
+├── deploy/                  # Deployment configuration (Pulumi)
+├── docs/                    # Documentation
+├── internal/                # Private application code
+│   ├── api/                 # HTTP handlers and routing
+│   ├── auth/                # Authentication (GitHub OAuth, JWT, namespace blocking)
+│   ├── config/              # Configuration management
+│   ├── database/            # Data persistence (PostgreSQL)
+│   ├── service/             # Business logic
+│   ├── telemetry/           # Metrics and monitoring
+│   └── validators/          # Input validation
+├── pkg/                     # Public packages
+│   ├── api/                 # API types and structures
+│   │   └── v0/              # Version 0 API types
+│   └── model/               # Data models for server.json
+├── scripts/                 # Development and testing scripts
+├── tests/                   # Integration tests
+└── tools/                   # CLI tools and utilities
+    └── validate-*.sh        # Schema validation tools
 ```
 
-Run locally:
+### Authentication
 
-```bash
-FRED_API_KEY=your-key SEC_USER_AGENT_EMAIL=your-email node dist/index.js
-```
+Publishing supports multiple authentication methods:
+- **GitHub OAuth** - For publishing by logging into GitHub
+- **GitHub OIDC** - For publishing from GitHub Actions
+- **DNS verification** - For proving ownership of a domain and its subdomains
+- **HTTP verification** - For proving ownership of a domain
 
-## License
+The registry validates namespace ownership when publishing. E.g. to publish...:
+- `io.github.domdomegg/my-cool-mcp` you must login to GitHub as `domdomegg`, or be in a GitHub Action on domdomegg's repos
+- `me.adamjones/my-cool-mcp` you must prove ownership of `adamjones.me` via DNS or HTTP challenge
 
-MIT
+## Community Projects
+
+Check out [community projects](docs/community-projects.md) to explore notable registry-related work created by the community.
+
+## More documentation
+
+See the [documentation](./docs) for more details if your question has not been answered here!

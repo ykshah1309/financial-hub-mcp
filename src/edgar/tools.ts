@@ -28,9 +28,18 @@ function formatNumber(n: number): string {
   return n.toFixed(2);
 }
 
-/** Compact JSON: no pretty-print for arrays, saves ~30% tokens */
+/** Minified JSON — no whitespace, saves ~30% tokens over pretty-print. */
 function compactJson(obj: unknown): string {
-  return JSON.stringify(obj, null, 2);
+  return JSON.stringify(obj);
+}
+
+/** MCP-compliant error response with isError flag. */
+function errorResult(err: unknown): { content: Array<{ type: "text"; text: string }>; isError: true } {
+  const message = err instanceof Error ? err.message : String(err);
+  return {
+    content: [{ type: "text" as const, text: message }],
+    isError: true,
+  };
 }
 
 export function registerEdgarTools(server: McpServer): void {
@@ -52,12 +61,12 @@ export function registerEdgarTools(server: McpServer): void {
       annotations: ANNOTATIONS,
     },
     async ({ query }) => {
-      const results = await searchCompanies(query);
-      return {
-        content: [
-          { type: "text" as const, text: compactJson(results) },
-        ],
-      };
+      try {
+        const results = await searchCompanies(query);
+        return { content: [{ type: "text" as const, text: compactJson(results) }] };
+      } catch (err) {
+        return errorResult(err);
+      }
     }
   );
 
@@ -85,12 +94,12 @@ export function registerEdgarTools(server: McpServer): void {
       annotations: ANNOTATIONS,
     },
     async ({ cik, formType }) => {
-      const submission = await getCompanyFilings(cik, formType);
-      return {
-        content: [
-          { type: "text" as const, text: compactJson(submission) },
-        ],
-      };
+      try {
+        const submission = await getCompanyFilings(cik, formType);
+        return { content: [{ type: "text" as const, text: compactJson(submission) }] };
+      } catch (err) {
+        return errorResult(err);
+      }
     }
   );
 
@@ -130,85 +139,81 @@ export function registerEdgarTools(server: McpServer): void {
       annotations: ANNOTATIONS,
     },
     async ({ cik, concept, taxonomy, annualOnly: onlyAnnual }) => {
-      const resolved = resolveConcept(concept);
-
-      // Try concept alias resolution first (uses cached company facts)
-      let tag = resolved.tags[0];
-      let rawFacts: any[] | null = null;
-      let unitKey = "USD";
-
       try {
-        const facts = await getCompanyFacts(cik);
-        const gaap = facts[taxonomy] ?? {};
-        const found = findConceptData(gaap, concept);
-        if (found) {
-          tag = found.tag;
-          rawFacts = found.facts;
-          unitKey = found.unit;
-        }
-      } catch {
-        // Fall back to direct concept API
-      }
+        const resolved = resolveConcept(concept);
 
-      // If alias resolution didn't find data, try direct API
-      if (!rawFacts) {
+        let tag = resolved.tags[0];
+        let rawFacts: any[] | null = null;
+        let unitKey = "USD";
+
         try {
-          const data = await getCompanyConcept(cik, tag, taxonomy);
-          rawFacts = data.units["USD"] ?? data.units["USD/shares"] ?? Object.values(data.units)[0] ?? [];
-          unitKey = data.units["USD"] ? "USD" : Object.keys(data.units)[0] ?? "USD";
+          const facts = await getCompanyFacts(cik);
+          const gaap = facts[taxonomy] ?? {};
+          const found = findConceptData(gaap, concept);
+          if (found) {
+            tag = found.tag;
+            rawFacts = found.facts;
+            unitKey = found.unit;
+          }
         } catch {
-          return {
-            content: [{
-              type: "text" as const,
-              text: `No data found for concept "${concept}" (tried tags: ${resolved.tags.join(", ")}). ` +
-                `This company may use a different XBRL tag for this metric.`,
-            }],
-          };
+          // Fall back to direct concept API
         }
+
+        if (!rawFacts) {
+          try {
+            const data = await getCompanyConcept(cik, tag, taxonomy);
+            rawFacts = data.units["USD"] ?? data.units["USD/shares"] ?? Object.values(data.units)[0] ?? [];
+            unitKey = data.units["USD"] ? "USD" : Object.keys(data.units)[0] ?? "USD";
+          } catch {
+            return {
+              content: [{
+                type: "text" as const,
+                text: `No data found for concept "${concept}" (tried tags: ${resolved.tags.join(", ")}). ` +
+                  `This company may use a different XBRL tag for this metric.`,
+              }],
+              isError: true,
+            };
+          }
+        }
+
+        let clean = deduplicateFacts(rawFacts);
+        if (onlyAnnual) clean = annualOnly(clean);
+
+        const capped = clean.slice(-20);
+        const totalAvailable = clean.length;
+
+        const annuals = annualOnly(clean);
+        const growth = computeGrowth(annuals);
+        const trend = detectTrend(growth);
+
+        const summary = {
+          cik,
+          metric: tag,
+          resolvedFrom: concept !== tag ? concept : undefined,
+          label: resolved.label,
+          unit: unitKey,
+          trend,
+          periodsShown: capped.length,
+          totalPeriodsAvailable: totalAvailable,
+          values: capped.map((f) => ({
+            periodEnd: f.periodEnd,
+            value: f.value,
+            formatted: formatNumber(f.value),
+            fiscalYear: f.fiscalYear,
+            fiscalPeriod: f.fiscalPeriod,
+            form: f.form,
+          })),
+          annualGrowth: growth.slice(-5).map((g) => ({
+            fiscalYear: g.fiscalYear,
+            value: formatNumber(g.value),
+            yoyGrowth: g.growthRate !== null ? (g.growthRate * 100).toFixed(1) + "%" : null,
+          })),
+        };
+
+        return { content: [{ type: "text" as const, text: compactJson(summary) }] };
+      } catch (err) {
+        return errorResult(err);
       }
-
-      // Deduplicate
-      let clean = deduplicateFacts(rawFacts);
-      if (onlyAnnual) clean = annualOnly(clean);
-
-      // Cap at 20 most recent periods to control response size
-      const capped = clean.slice(-20);
-      const totalAvailable = clean.length;
-
-      // Compute growth for annual data
-      const annuals = annualOnly(clean);
-      const growth = computeGrowth(annuals);
-      const trend = detectTrend(growth);
-
-      const summary = {
-        cik,
-        metric: tag,
-        resolvedFrom: concept !== tag ? concept : undefined,
-        label: resolved.label,
-        unit: unitKey,
-        trend,
-        periodsShown: capped.length,
-        totalPeriodsAvailable: totalAvailable,
-        values: capped.map((f) => ({
-          periodEnd: f.periodEnd,
-          value: f.value,
-          formatted: formatNumber(f.value),
-          fiscalYear: f.fiscalYear,
-          fiscalPeriod: f.fiscalPeriod,
-          form: f.form,
-        })),
-        annualGrowth: growth.slice(-5).map((g) => ({
-          fiscalYear: g.fiscalYear,
-          value: formatNumber(g.value),
-          yoyGrowth: g.growthRate !== null ? (g.growthRate * 100).toFixed(1) + "%" : null,
-        })),
-      };
-
-      return {
-        content: [
-          { type: "text" as const, text: compactJson(summary) },
-        ],
-      };
     }
   );
 
@@ -229,83 +234,67 @@ export function registerEdgarTools(server: McpServer): void {
       annotations: ANNOTATIONS,
     },
     async ({ cik }) => {
-      const facts = await getCompanyFacts(cik);
-      const gaap = facts["us-gaap"] ?? {};
+      try {
+        const facts = await getCompanyFacts(cik);
+        const gaap = facts["us-gaap"] ?? {};
 
-      function latestAnnual(conceptInput: string): { value: number; period: string; formatted: string } | null {
-        const found = findConceptData(gaap, conceptInput);
-        if (!found) return null;
+        function latestAnnual(conceptInput: string): { value: number; period: string; formatted: string } | null {
+          const found = findConceptData(gaap, conceptInput);
+          if (!found) return null;
 
-        const deduped = deduplicateFacts(found.facts);
-        const annuals = annualOnly(deduped);
-        const last = annuals[annuals.length - 1] ?? deduped[deduped.length - 1];
-        if (!last) return null;
+          const deduped = deduplicateFacts(found.facts);
+          const annuals = annualOnly(deduped);
+          const last = annuals[annuals.length - 1] ?? deduped[deduped.length - 1];
+          if (!last) return null;
 
-        return { value: last.value, period: last.periodEnd, formatted: formatNumber(last.value) };
+          return { value: last.value, period: last.periodEnd, formatted: formatNumber(last.value) };
+        }
+
+        const revenue = latestAnnual("revenue");
+        const netIncome = latestAnnual("net_income");
+        const totalAssets = latestAnnual("total_assets");
+        const totalLiabilities = latestAnnual("total_liabilities");
+        const equity = latestAnnual("stockholders_equity");
+        const cash = latestAnnual("cash");
+        const debt = latestAnnual("long_term_debt");
+        const eps = latestAnnual("eps");
+        const currentAssets = latestAnnual("current_assets");
+        const currentLiabilities = latestAnnual("current_liabilities");
+        const operatingCashFlow = latestAnnual("operating_cash_flow");
+        const capex = latestAnnual("capex");
+
+        const profitMargin = revenue && netIncome
+          ? ((netIncome.value / revenue.value) * 100).toFixed(1) + "%"
+          : null;
+        const debtToEquity = equity && debt && equity.value !== 0
+          ? (debt.value / equity.value).toFixed(2)
+          : null;
+        const currentRatio = currentAssets && currentLiabilities && currentLiabilities.value !== 0
+          ? (currentAssets.value / currentLiabilities.value).toFixed(2)
+          : null;
+        const roe = equity && netIncome && equity.value !== 0
+          ? ((netIncome.value / equity.value) * 100).toFixed(1) + "%"
+          : null;
+        const roa = totalAssets && netIncome && totalAssets.value !== 0
+          ? ((netIncome.value / totalAssets.value) * 100).toFixed(1) + "%"
+          : null;
+        const freeCashFlow = operatingCashFlow && capex
+          ? { value: operatingCashFlow.value - capex.value, formatted: formatNumber(operatingCashFlow.value - capex.value) }
+          : null;
+
+        const summary = {
+          metrics: {
+            revenue, netIncome, totalAssets, totalLiabilities,
+            stockholdersEquity: equity, cash, longTermDebt: debt, eps,
+            currentAssets, currentLiabilities, operatingCashFlow, freeCashFlow,
+          },
+          ratios: { profitMargin, debtToEquity, currentRatio, returnOnEquity: roe, returnOnAssets: roa },
+        };
+
+        return { content: [{ type: "text" as const, text: compactJson(summary) }] };
+      } catch (err) {
+        return errorResult(err);
       }
-
-      const revenue = latestAnnual("revenue");
-      const netIncome = latestAnnual("net_income");
-      const totalAssets = latestAnnual("total_assets");
-      const totalLiabilities = latestAnnual("total_liabilities");
-      const equity = latestAnnual("stockholders_equity");
-      const cash = latestAnnual("cash");
-      const debt = latestAnnual("long_term_debt");
-      const eps = latestAnnual("eps");
-      const currentAssets = latestAnnual("current_assets");
-      const currentLiabilities = latestAnnual("current_liabilities");
-      const operatingCashFlow = latestAnnual("operating_cash_flow");
-      const capex = latestAnnual("capex");
-
-      // Computed ratios
-      const profitMargin = revenue && netIncome
-        ? ((netIncome.value / revenue.value) * 100).toFixed(1) + "%"
-        : null;
-      const debtToEquity = equity && debt && equity.value !== 0
-        ? (debt.value / equity.value).toFixed(2)
-        : null;
-      const currentRatio = currentAssets && currentLiabilities && currentLiabilities.value !== 0
-        ? (currentAssets.value / currentLiabilities.value).toFixed(2)
-        : null;
-      const roe = equity && netIncome && equity.value !== 0
-        ? ((netIncome.value / equity.value) * 100).toFixed(1) + "%"
-        : null;
-      const roa = totalAssets && netIncome && totalAssets.value !== 0
-        ? ((netIncome.value / totalAssets.value) * 100).toFixed(1) + "%"
-        : null;
-      const freeCashFlow = operatingCashFlow && capex
-        ? { value: operatingCashFlow.value - capex.value, formatted: formatNumber(operatingCashFlow.value - capex.value) }
-        : null;
-
-      const summary = {
-        metrics: {
-          revenue,
-          netIncome,
-          totalAssets,
-          totalLiabilities,
-          stockholdersEquity: equity,
-          cash,
-          longTermDebt: debt,
-          eps,
-          currentAssets,
-          currentLiabilities,
-          operatingCashFlow,
-          freeCashFlow,
-        },
-        ratios: {
-          profitMargin,
-          debtToEquity,
-          currentRatio,
-          returnOnEquity: roe,
-          returnOnAssets: roa,
-        },
-      };
-
-      return {
-        content: [
-          { type: "text" as const, text: compactJson(summary) },
-        ],
-      };
     }
   );
 
@@ -330,14 +319,14 @@ export function registerEdgarTools(server: McpServer): void {
       annotations: ANNOTATIONS,
     },
     async ({ cik, limit }) => {
-      const facts = await getCompanyFacts(cik);
-      const gaap = facts["us-gaap"] ?? {};
-      const cap = Math.min(limit ?? 40, 100);
-      const summary = summarizeFacts(gaap, cap);
+      try {
+        const facts = await getCompanyFacts(cik);
+        const gaap = facts["us-gaap"] ?? {};
+        const cap = Math.min(limit ?? 40, 100);
+        const summary = summarizeFacts(gaap, cap);
 
-      return {
-        content: [
-          {
+        return {
+          content: [{
             type: "text" as const,
             text: compactJson({
               cik,
@@ -345,9 +334,11 @@ export function registerEdgarTools(server: McpServer): void {
               totalConcepts: Object.keys(gaap).length,
               topConcepts: summary,
             }),
-          },
-        ],
-      };
+          }],
+        };
+      } catch (err) {
+        return errorResult(err);
+      }
     }
   );
 
@@ -368,12 +359,12 @@ export function registerEdgarTools(server: McpServer): void {
       annotations: ANNOTATIONS,
     },
     async ({ cik }) => {
-      const analysis = await analyzeCompany(cik);
-      return {
-        content: [
-          { type: "text" as const, text: compactJson(analysis) },
-        ],
-      };
+      try {
+        const analysis = await analyzeCompany(cik);
+        return { content: [{ type: "text" as const, text: compactJson(analysis) }] };
+      } catch (err) {
+        return errorResult(err);
+      }
     }
   );
 
@@ -397,12 +388,12 @@ export function registerEdgarTools(server: McpServer): void {
       annotations: ANNOTATIONS,
     },
     async ({ ciks }) => {
-      const comparison = await compareCompanies(ciks);
-      return {
-        content: [
-          { type: "text" as const, text: compactJson(comparison) },
-        ],
-      };
+      try {
+        const comparison = await compareCompanies(ciks);
+        return { content: [{ type: "text" as const, text: compactJson(comparison) }] };
+      } catch (err) {
+        return errorResult(err);
+      }
     }
   );
 
@@ -433,12 +424,12 @@ export function registerEdgarTools(server: McpServer): void {
       annotations: ANNOTATIONS,
     },
     async ({ query, forms, startDate, endDate }) => {
-      const results = await searchFilings(query, forms, startDate, endDate);
-      return {
-        content: [
-          { type: "text" as const, text: compactJson(results) },
-        ],
-      };
+      try {
+        const results = await searchFilings(query, forms, startDate, endDate);
+        return { content: [{ type: "text" as const, text: compactJson(results) }] };
+      } catch (err) {
+        return errorResult(err);
+      }
     }
   );
 }

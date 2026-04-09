@@ -17,7 +17,14 @@ const BASE = "https://data.sec.gov";
 const EFTS_BASE = "https://efts.sec.gov/LATEST";
 
 function getUserAgent(): string {
-  const email = process.env.SEC_USER_AGENT_EMAIL || "user@example.com";
+  const email = process.env.SEC_USER_AGENT_EMAIL;
+  if (!email) {
+    throw new Error(
+      "SEC_USER_AGENT_EMAIL environment variable is required. " +
+      "SEC EDGAR requires a valid email in the User-Agent header. " +
+      "Requests without one risk an IP ban from data.sec.gov."
+    );
+  }
   return `financial-hub-mcp/1.0 ${email}`;
 }
 

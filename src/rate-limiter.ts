@@ -1,12 +1,16 @@
 /**
- * Token-bucket rate limiter with request queuing.
+ * Token-bucket rate limiter with bounded request queuing.
  *
  * Prevents hitting SEC EDGAR (10 req/s) and FRED (120 req/min) rate limits.
- * Requests that exceed the budget are queued and resolved in order.
+ * Requests that exceed the budget are queued with a timeout — if the queue
+ * is full or the wait exceeds the deadline, the request is rejected immediately
+ * so the LLM can pivot rather than stall indefinitely.
  */
 
 interface QueuedRequest {
   resolve: () => void;
+  reject: (err: Error) => void;
+  deadline: number;
 }
 
 export class RateLimiter {
@@ -16,16 +20,22 @@ export class RateLimiter {
   private lastRefill: number;
   private queue: QueuedRequest[] = [];
   private draining = false;
+  private readonly maxQueueSize: number;
+  private readonly timeoutMs: number;
 
   /**
    * @param maxPerSecond  Maximum requests per second
    * @param burst         Burst capacity (defaults to 80% of maxPerSecond)
+   * @param maxQueue      Max queued requests before rejecting (default 50)
+   * @param timeoutMs     Max ms a request can wait in queue (default 30s)
    */
-  constructor(maxPerSecond: number, burst?: number) {
+  constructor(maxPerSecond: number, burst?: number, maxQueue = 50, timeoutMs = 30_000) {
     this.maxTokens = burst ?? Math.max(1, Math.floor(maxPerSecond * 0.8));
     this.tokens = this.maxTokens;
     this.refillRate = maxPerSecond / 1000;
     this.lastRefill = Date.now();
+    this.maxQueueSize = maxQueue;
+    this.timeoutMs = timeoutMs;
   }
 
   private refill(): void {
@@ -40,29 +50,44 @@ export class RateLimiter {
     this.draining = true;
 
     while (this.queue.length > 0) {
+      // Evict expired requests from the front
+      const now = Date.now();
+      while (this.queue.length > 0 && this.queue[0].deadline <= now) {
+        const expired = this.queue.shift()!;
+        expired.reject(new Error("Rate limiter timeout: request waited too long in queue"));
+      }
+      if (this.queue.length === 0) break;
+
       this.refill();
       if (this.tokens >= 1) {
         this.tokens -= 1;
         this.queue.shift()!.resolve();
       } else {
-        // Wait until at least one token is available
         const waitMs = Math.ceil((1 - this.tokens) / this.refillRate);
-        await sleep(waitMs);
+        await sleep(Math.min(waitMs, 200)); // wake frequently to check deadlines
       }
     }
 
     this.draining = false;
   }
 
-  /** Acquire a token. Resolves immediately if available, queues otherwise. */
+  /** Acquire a token. Resolves immediately if available, queues with timeout otherwise. */
   async acquire(): Promise<void> {
     this.refill();
     if (this.tokens >= 1) {
       this.tokens -= 1;
       return;
     }
-    return new Promise<void>((resolve) => {
-      this.queue.push({ resolve });
+
+    if (this.queue.length >= this.maxQueueSize) {
+      throw new Error(
+        `Rate limiter queue full (${this.maxQueueSize} pending). ` +
+        `Too many concurrent requests — slow down or reduce parallelism.`
+      );
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      this.queue.push({ resolve, reject, deadline: Date.now() + this.timeoutMs });
       this.drainQueue();
     });
   }
@@ -106,8 +131,8 @@ export async function fetchWithRetry(
 
 // ── Shared instances ────────────────────────────────────────────────────────
 
-/** SEC EDGAR: 10 req/s, burst 8 */
-export const edgarLimiter = new RateLimiter(10, 8);
+/** SEC EDGAR: 10 req/s, burst 8, max 50 queued, 30s timeout */
+export const edgarLimiter = new RateLimiter(10, 8, 50, 30_000);
 
-/** FRED: 120 req/min = 2 req/s, burst 2 */
-export const fredLimiter = new RateLimiter(2, 2);
+/** FRED: 120 req/min = 2 req/s, burst 2, max 30 queued, 30s timeout */
+export const fredLimiter = new RateLimiter(2, 2, 30, 30_000);

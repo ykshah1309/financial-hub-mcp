@@ -7,9 +7,29 @@ import { registerEdgarResources } from "./edgar/resources.js";
 import { registerFredTools } from "./fred/tools.js";
 import { registerPrompts } from "./prompts.js";
 
+// ── Startup validation ────────────────────────────────────────────────────
+// Fail fast on missing config rather than breaking mid-conversation.
+
+if (!process.env.SEC_USER_AGENT_EMAIL) {
+  console.error(
+    "FATAL: SEC_USER_AGENT_EMAIL is not set. " +
+    "SEC EDGAR requires a valid email in the User-Agent header — " +
+    "requests without one risk an IP ban. Exiting."
+  );
+  process.exit(1);
+}
+
+if (!process.env.FRED_API_KEY) {
+  console.error(
+    "WARNING: FRED_API_KEY is not set. " +
+    "FRED economic data tools will fail at runtime. " +
+    "Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html"
+  );
+}
+
 const server = new McpServer({
   name: "financial-hub-mcp",
-  version: "1.0.0",
+  version: "1.2.0",
 });
 
 // Register all tools, resources, and prompts
@@ -22,11 +42,9 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Financial Hub MCP Server running on stdio");
+  console.error(`SEC EDGAR: configured (${process.env.SEC_USER_AGENT_EMAIL})`);
   console.error(
-    `SEC EDGAR: ${process.env.SEC_USER_AGENT_EMAIL ? "configured" : "set SEC_USER_AGENT_EMAIL for best results"}`
-  );
-  console.error(
-    `FRED: ${process.env.FRED_API_KEY ? "API key configured" : "set FRED_API_KEY for economic data"}`
+    `FRED: ${process.env.FRED_API_KEY ? "API key configured" : "NOT configured (FRED tools will fail)"}`
   );
 }
 

@@ -1,8 +1,9 @@
 /**
- * Simple in-memory TTL cache.
+ * In-memory TTL cache with bounded size and proactive eviction.
  *
- * Reduces redundant API calls to SEC EDGAR and FRED, easing rate-limit
- * pressure and improving latency for repeated queries on the same company.
+ * SEC company facts payloads can be 20-50MB each. Caching 200 of them
+ * would OOM any Node process. This cache enforces strict entry limits
+ * and sweeps expired entries on every write to prevent memory buildup.
  */
 
 interface CacheEntry<T> {
@@ -17,9 +18,9 @@ export class TTLCache<T> {
 
   /**
    * @param ttlSeconds  Time-to-live in seconds
-   * @param maxSize     Max entries before oldest are evicted
+   * @param maxSize     Max entries — hard limit, oldest evicted when full
    */
-  constructor(ttlSeconds: number, maxSize = 200) {
+  constructor(ttlSeconds: number, maxSize: number) {
     this.ttlMs = ttlSeconds * 1000;
     this.maxSize = maxSize;
   }
@@ -35,11 +36,16 @@ export class TTLCache<T> {
   }
 
   set(key: string, value: T): void {
-    // Evict oldest if at capacity
-    if (this.store.size >= this.maxSize) {
+    // Proactive sweep: remove all expired entries before inserting
+    this.evictExpired();
+
+    // If still at capacity, evict oldest
+    while (this.store.size >= this.maxSize) {
       const oldest = this.store.keys().next().value;
       if (oldest !== undefined) this.store.delete(oldest);
+      else break;
     }
+
     this.store.set(key, { value, expiresAt: Date.now() + this.ttlMs });
   }
 
@@ -50,18 +56,33 @@ export class TTLCache<T> {
   clear(): void {
     this.store.clear();
   }
+
+  get size(): number {
+    return this.store.size;
+  }
+
+  /** Remove all expired entries immediately. */
+  private evictExpired(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.store) {
+      if (entry.expiresAt <= now) {
+        this.store.delete(key);
+      }
+    }
+  }
 }
 
 // ── Shared cache instances ──────────────────────────────────────────────────
+// Sizes are deliberately small for heavy payloads to prevent OOM.
 
-/** Company facts: 1 hour TTL (filings update infrequently) */
-export const factsCache = new TTLCache<any>(3600);
+/** Company facts: 1h TTL, max 15 entries (~20-50MB each, 15 = ~300-750MB worst case) */
+export const factsCache = new TTLCache<any>(3600, 15);
 
-/** Company submissions: 1 hour TTL */
-export const submissionsCache = new TTLCache<any>(3600);
+/** Company submissions: 1h TTL, max 30 entries (~50KB each, negligible) */
+export const submissionsCache = new TTLCache<any>(3600, 30);
 
-/** FRED series metadata: 6 hour TTL */
-export const fredSeriesCache = new TTLCache<any>(21600);
+/** FRED series metadata: 6h TTL, max 100 entries (~1KB each) */
+export const fredSeriesCache = new TTLCache<any>(21600, 100);
 
-/** FRED observations: 1 hour TTL */
-export const fredObsCache = new TTLCache<any>(3600);
+/** FRED observations: 1h TTL, max 50 entries (~5KB each) */
+export const fredObsCache = new TTLCache<any>(3600, 50);
