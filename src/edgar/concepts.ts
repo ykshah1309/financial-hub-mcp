@@ -296,6 +296,9 @@ export function findConceptData(
 ): { tag: string; label: string; unit: string; facts: XBRLFact[] } | null {
   const { tags, label } = resolveConcept(conceptInput);
 
+  let bestMatch: { tag: string; label: string; unit: string; facts: XBRLFact[] } | null = null;
+  let bestLatestDate = "";
+
   for (const tag of tags) {
     const concept = gaapFacts[tag];
     if (!concept?.units) continue;
@@ -314,11 +317,21 @@ export function findConceptData(
 
     const facts = concept.units[unitKey];
     if (facts && facts.length > 0) {
-      return { tag, label: concept.label ?? label, unit: unitKey, facts };
+      // Prefer the tag whose data is most recent — avoids returning
+      // stale pre-ASC-606 tags when a newer tag covers the same metric.
+      const latestDate = facts.reduce((max: string, f: XBRLFact) => {
+        const d = f.end ?? f.filed ?? "";
+        return d > max ? d : max;
+      }, "");
+
+      if (!bestMatch || latestDate > bestLatestDate) {
+        bestMatch = { tag, label: concept.label ?? label, unit: unitKey, facts };
+        bestLatestDate = latestDate;
+      }
     }
   }
 
-  return null;
+  return bestMatch;
 }
 
 /**

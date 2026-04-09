@@ -30,9 +30,11 @@ async function fredFetch(endpoint: string, params: Record<string, string>): Prom
     url.searchParams.set(k, v);
   }
 
+  url.searchParams.set("api_key", getApiKey());
+
   const res = await fetchWithRetry(
     url.toString(),
-    { headers: { Authorization: `Bearer ${getApiKey()}` } },
+    {},
     fredLimiter
   );
   if (!res.ok) {
@@ -188,7 +190,8 @@ export async function getObservations(
       date: o.date,
       value: parseFloat(o.value),
     }))
-    .filter((o) => !isNaN(o.value));
+    .filter((o) => !isNaN(o.value))
+    .reverse(); // API returns desc for correct limit slicing; reverse to chronological for consumers
 
   const result = { series: info, observations };
   fredObsCache.set(obsCacheKey, result);

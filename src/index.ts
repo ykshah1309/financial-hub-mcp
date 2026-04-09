@@ -29,7 +29,7 @@ if (!process.env.FRED_API_KEY) {
 
 const server = new McpServer({
   name: "financial-hub-mcp",
-  version: "1.2.1",
+  version: "1.2.2",
 });
 
 // Register all tools, resources, and prompts

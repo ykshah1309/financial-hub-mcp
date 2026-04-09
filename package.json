@@ -1,6 +1,6 @@
 {
   "name": "financial-hub-mcp",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "MCP server for financial data — SEC EDGAR filings, XBRL financials, and FRED economic indicators",
   "license": "MIT",
   "author": "ykshah1309",

@@ -137,7 +137,7 @@ export interface CompanyConcept {
 export interface SearchResult {
   name: string;
   ticker: string;
-  cik: number;
+  cik: string;
 }
 
 export interface FilingSearchResult {
@@ -187,7 +187,7 @@ export async function searchCompanies(query: string): Promise<SearchResult[]> {
         c.name.toLowerCase().includes(q)
     )
     .slice(0, 20)
-    .map((c) => ({ name: c.name, ticker: c.ticker, cik: c.cik }));
+    .map((c) => ({ name: c.name, ticker: c.ticker, cik: String(c.cik) }));
 }
 
 /**
