@@ -7,6 +7,9 @@
  * Rate limit: 120 requests/minute.
  */
 
+import { fredLimiter, fetchWithRetry } from "../rate-limiter.js";
+import { fredSeriesCache, fredObsCache } from "../cache.js";
+
 const BASE = "https://api.stlouisfed.org/fred";
 
 function getApiKey(): string {
@@ -28,7 +31,7 @@ async function fredFetch(endpoint: string, params: Record<string, string>): Prom
     url.searchParams.set(k, v);
   }
 
-  const res = await fetch(url.toString());
+  const res = await fetchWithRetry(url.toString(), {}, fredLimiter);
   if (!res.ok) {
     throw new Error(`FRED API request failed: ${res.status} ${res.statusText}`);
   }
@@ -83,8 +86,13 @@ export async function searchSeries(query: string, limit: number = 15): Promise<F
 
 /**
  * Get metadata for a specific series.
+ * Cached for 6 hours — series metadata rarely changes.
  */
 export async function getSeriesInfo(seriesId: string): Promise<FredSeries> {
+  const cacheKey = `series:${seriesId}`;
+  const cached = fredSeriesCache.get(cacheKey);
+  if (cached) return cached as FredSeries;
+
   const data = (await fredFetch("series", {
     series_id: seriesId,
   })) as any;
@@ -92,7 +100,7 @@ export async function getSeriesInfo(seriesId: string): Promise<FredSeries> {
   const s = data.seriess?.[0];
   if (!s) throw new Error(`Series not found: ${seriesId}`);
 
-  return {
+  const info: FredSeries = {
     id: s.id,
     title: s.title,
     frequency: s.frequency,
@@ -101,6 +109,8 @@ export async function getSeriesInfo(seriesId: string): Promise<FredSeries> {
     lastUpdated: s.last_updated,
     notes: s.notes ?? "",
   };
+  fredSeriesCache.set(cacheKey, info);
+  return info;
 }
 
 /**
@@ -122,6 +132,10 @@ export async function getObservations(
   endDate?: string,
   limit: number = 60
 ): Promise<{ series: FredSeries; observations: FredObservation[] }> {
+  const obsCacheKey = `obs:${seriesId}:${startDate ?? ""}:${endDate ?? ""}:${limit}`;
+  const cached = fredObsCache.get(obsCacheKey);
+  if (cached) return cached as { series: FredSeries; observations: FredObservation[] };
+
   const params: Record<string, string> = {
     series_id: seriesId,
     sort_order: "desc",
@@ -142,5 +156,7 @@ export async function getObservations(
       value: o.value,
     }));
 
-  return { series: info, observations };
+  const result = { series: info, observations };
+  fredObsCache.set(obsCacheKey, result);
+  return result;
 }

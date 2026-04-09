@@ -10,6 +10,9 @@
  *   https://www.sec.gov/about/developer-resources
  */
 
+import { edgarLimiter, fetchWithRetry } from "../rate-limiter.js";
+import { factsCache, submissionsCache } from "../cache.js";
+
 const BASE = "https://data.sec.gov";
 const EFTS_BASE = "https://efts.sec.gov/LATEST";
 
@@ -21,12 +24,11 @@ function getUserAgent(): string {
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 async function edgarFetch(url: string): Promise<unknown> {
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": getUserAgent(),
-      Accept: "application/json",
-    },
-  });
+  const headers = {
+    "User-Agent": getUserAgent(),
+    Accept: "application/json",
+  };
+  const res = await fetchWithRetry(url, { headers }, edgarLimiter);
   if (!res.ok) {
     throw new Error(`SEC EDGAR request failed: ${res.status} ${res.statusText} (${url})`);
   }
@@ -131,9 +133,14 @@ export async function getCompanyFilings(
   cik: string | number,
   formType?: string
 ): Promise<CompanySubmission> {
-  const data = (await edgarFetch(
-    `${BASE}/submissions/CIK${padCik(cik)}.json`
-  )) as any;
+  const cacheKey = `sub:${padCik(cik)}`;
+  let data = submissionsCache.get(cacheKey);
+  if (!data) {
+    data = (await edgarFetch(
+      `${BASE}/submissions/CIK${padCik(cik)}.json`
+    )) as any;
+    submissionsCache.set(cacheKey, data);
+  }
 
   const recent = data.filings?.recent ?? {};
   const count = recent.accessionNumber?.length ?? 0;
@@ -201,15 +208,22 @@ export async function getCompanyConcept(
 
 /**
  * Get all XBRL company facts at once (all concepts).
+ * Results are cached for 1 hour to avoid redundant SEC requests.
  */
 export async function getCompanyFacts(
   cik: string | number
 ): Promise<Record<string, Record<string, CompanyConcept>>> {
+  const cacheKey = `facts:${padCik(cik)}`;
+  const cached = factsCache.get(cacheKey);
+  if (cached) return cached;
+
   const data = (await edgarFetch(
     `${BASE}/api/xbrl/companyfacts/CIK${padCik(cik)}.json`
   )) as any;
 
-  return data.facts ?? {};
+  const facts = data.facts ?? {};
+  factsCache.set(cacheKey, facts);
+  return facts;
 }
 
 /**
