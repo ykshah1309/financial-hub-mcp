@@ -1,6 +1,6 @@
 # Financial Hub MCP Server
 
-A TypeScript MCP server for financial data aggregation. Connects any MCP-compatible AI assistant to SEC EDGAR filings, structured XBRL financial statements, and FRED economic indicators — with built-in XBRL normalization, fact deduplication, computed analytics, and rate-limit protection.
+A TypeScript MCP server for financial data aggregation. Connects any MCP-compatible AI assistant to SEC EDGAR filings, XBRL financial statements, FRED economic indicators, and real-time market data — with built-in XBRL normalization, fact deduplication, computed analytics, stock screening, and rate-limit protection.
 
 ## Core Concepts
 
@@ -14,7 +14,11 @@ All SEC EDGAR data comes directly from the SEC's free public APIs at `data.sec.g
 
 ### FRED
 
-FRED (Federal Reserve Economic Data) provides 800,000+ time series from 100+ sources. Requires a free API key from [fred.stlouisfed.org](https://fred.stlouisfed.org/docs/api/api_key.html). Rate limited to 120 requests/minute (enforced via 2 req/s token bucket).
+FRED (Federal Reserve Economic Data) provides 800,000+ time series from 100+ sources. Requires a free API key from [fred.stlouisfed.org](https://fred.stlouisfed.org/docs/api/api_key.html). Rate limited to 120 requests/minute (enforced via 2 req/s token bucket). Includes a curated catalog of ~50 essential economic indicators across 9 categories for zero-API-call browsing.
+
+### Finnhub Market Data
+
+Real-time stock quotes, company profiles, market news, insider transactions, and financial metrics via the [Finnhub API](https://finnhub.io). Free tier provides 30 API calls/second with no credit card required. The server rate-limits to 25 req/s to stay safely under the threshold. Quotes are never cached (stale prices are worse than no cache), while profiles (24h), news (5min), and financial metrics (1h) use appropriate TTLs.
 
 ### Caching
 
@@ -27,6 +31,10 @@ In-memory LRU cache with TTL expiry reduces redundant API calls:
 | Company tickers | 24 hours | 1 | ~3 MB |
 | FRED series metadata | 6 hours | 100 | ~1 KB each |
 | FRED observations | 1 hour | 50 | ~5 KB each |
+| Market profiles | 24 hours | 50 | ~1 KB each |
+| Market news | 5 minutes | 10 | ~5 KB each |
+| Insider transactions | 1 hour | 30 | ~3 KB each |
+| Basic financials | 1 hour | 30 | ~2 KB each |
 
 Eviction is LRU — frequently accessed entries are promoted on read, so the least recently used entry is evicted when capacity is full. Expired entries are proactively swept on every write.
 
@@ -100,6 +108,27 @@ Eviction is LRU — frequently accessed entries are promoted on read, so the lea
   - Returns results array + total hit count for pagination
   - Searches the full text of any filing since 2001
 
+- **screen_stocks**
+  - Screen SEC-registered companies by exchange, industry, name, and financial health
+  - Inputs:
+    - `exchange` (string, optional): Filter by exchange (e.g. NYSE, Nasdaq)
+    - `industry` (string, optional): SIC industry group (technology, finance, healthcare, energy, manufacturing, retail, transportation, utilities, services, public_admin)
+    - `nameContains` (string, optional): Case-insensitive substring match on company name
+    - `minHealthScore` (number, optional): Minimum health grade (0-100) from financial analysis
+    - `limit` (number, optional): Max results (default 20, max 50)
+  - Two-phase screening: instant client-side filtering on 10,000+ companies, then optional deep filtering via SEC API for industry and health metrics
+
+- **get_corporate_events**
+  - Get recent 8-K corporate events with significance classification
+  - Inputs:
+    - `cik` (string): Company CIK number
+    - `significance` (string, optional): Filter by `high`, `medium`, or `low` significance
+    - `limit` (number, optional): Max events (default 15, max 50)
+  - Classifies 25 SEC 8-K item numbers into human-readable categories with significance levels
+  - High significance: CEO changes, M&A, bankruptcy, material agreements, auditor changes
+  - Medium: earnings releases, departures, asset sales, amendments
+  - Uses existing submissions data — zero additional API calls
+
 - **search_economic_data**
   - Search the FRED database for economic data series
   - Input: `query` (string)
@@ -114,12 +143,47 @@ Eviction is LRU — frequently accessed entries are promoted on read, so the lea
     - `endDate` (string, optional): YYYY-MM-DD
   - Common series: `GDP`, `CPIAUCSL` (CPI), `UNRATE` (unemployment), `FEDFUNDS`, `DGS10` (10-year treasury), `SP500`, `MORTGAGE30US`
 
+- **get_stock_quote**
+  - Get a real-time stock price quote from Finnhub
+  - Input: `symbol` (string): Stock ticker (e.g. AAPL, MSFT, GOOGL)
+  - Returns current price, daily change, percent change, day high/low, open, and previous close
+  - Live data — never cached
+
+- **get_market_news**
+  - Get latest financial news headlines
+  - Inputs:
+    - `symbol` (string, optional): Stock ticker for company-specific news. Omit for general market news
+    - `category` (string, optional): `general`, `forex`, `crypto`, `merger` (only for general news)
+  - Returns up to 20 articles with headline, summary, source, URL, and datetime
+
+- **get_insider_transactions**
+  - Get recent insider trading activity for a company
+  - Input: `symbol` (string): Stock ticker (e.g. AAPL, TSLA)
+  - Returns insider names, share counts, transaction dates, prices, and buy/sell codes
+  - Transaction codes: P = Purchase, S = Sale, M = Option Exercise, A = Grant/Award, G = Gift, F = Tax withholding
+
+- **get_company_overview**
+  - Get a comprehensive company overview combining profile, market metrics, and peers
+  - Input: `symbol` (string): Stock ticker (e.g. AAPL, MSFT)
+  - Returns name, exchange, industry, market cap, PE ratio, beta, 52-week range, EPS, dividend yield, and peer tickers
+  - Merges data from 4 parallel Finnhub API calls (profile, financials, peers, quote)
+
 ### Resources
 
 - **sec://company/{ticker}**
   - Company profile with SEC metadata and recent filings
   - Includes: name, CIK, tickers, exchanges, SIC code, fiscal year end, and the 10 most recent filings
   - Browsable from any MCP client that supports resources
+
+- **fred://catalog/{category}**
+  - Browse curated FRED economic indicators by category
+  - Categories: gdp, labor, inflation, rates, housing, markets, money, trade, consumer
+  - Returns series IDs, titles, frequencies, and descriptions — zero API calls
+
+- **fred://indicator/{seriesId}**
+  - FRED indicator detail with latest observations
+  - Returns series metadata from the catalog plus the 10 most recent data points
+  - Use this to inspect a specific indicator before pulling full time series
 
 ### Prompts
 
@@ -175,7 +239,8 @@ Add this to your `claude_desktop_config.json`:
       "args": ["-y", "financial-hub-mcp"],
       "env": {
         "FRED_API_KEY": "your-free-api-key",
-        "SEC_USER_AGENT_EMAIL": "your-email@example.com"
+        "SEC_USER_AGENT_EMAIL": "your-email@example.com",
+        "FINNHUB_API_KEY": "your-free-api-key"
       }
     }
   }
@@ -196,7 +261,8 @@ For manual installation, add the configuration to your user-level MCP configurat
       "args": ["-y", "financial-hub-mcp"],
       "env": {
         "FRED_API_KEY": "your-free-api-key",
-        "SEC_USER_AGENT_EMAIL": "your-email@example.com"
+        "SEC_USER_AGENT_EMAIL": "your-email@example.com",
+        "FINNHUB_API_KEY": "your-free-api-key"
       }
     }
   }
@@ -211,6 +277,7 @@ For manual installation, add the configuration to your user-level MCP configurat
 |----------|----------|-------------|
 | `SEC_USER_AGENT_EMAIL` | **Yes** | Your email address for SEC EDGAR API compliance. The server will **exit immediately** if this is not set — SEC EDGAR bans requests with missing or generic User-Agent headers. |
 | `FRED_API_KEY` | For FRED tools | Free 32-character key from [fred.stlouisfed.org](https://fred.stlouisfed.org/docs/api/api_key.html). The server starts without it but FRED tools will fail at runtime with a clear error message. |
+| `FINNHUB_API_KEY` | For market tools | Free API key from [finnhub.io](https://finnhub.io/register). Required for stock quotes, market news, insider transactions, and company overviews. The server starts without it but market tools will fail at runtime. |
 
 ## Architecture
 
@@ -221,14 +288,21 @@ src/
 ├── cache.ts              # In-memory TTL cache with proactive eviction
 ├── edgar/
 │   ├── client.ts         # SEC EDGAR HTTP client (rate-limited, cached)
-│   ├── tools.ts          # MCP tool registrations (10 tools, isError envelopes)
+│   ├── tools.ts          # MCP tool registrations (12 tools, isError envelopes)
 │   ├── resources.ts      # MCP resource templates (company profiles)
 │   ├── xbrl.ts           # XBRL fact deduplication, growth, trend detection
 │   ├── concepts.ts       # Concept alias normalization (20+ financial concepts)
-│   └── analytics.ts      # Computed ratios, health scoring, company comparison
+│   ├── analytics.ts      # Computed ratios, health scoring, company comparison
+│   ├── events.ts         # 8-K corporate event classification (25 item types)
+│   └── screening.ts      # Stock screening by exchange, industry, health score
 ├── fred/
 │   ├── client.ts         # FRED HTTP client (rate-limited, cached)
-│   └── tools.ts          # FRED MCP tool registrations
+│   ├── tools.ts          # FRED MCP tool registrations
+│   ├── catalog.ts        # Curated catalog of ~50 essential FRED indicators
+│   └── resources.ts      # FRED MCP resource templates (catalog + indicators)
+├── market/
+│   ├── client.ts         # Finnhub HTTP client (rate-limited, cached)
+│   └── tools.ts          # Market data MCP tool registrations (4 tools)
 └── prompts.ts            # Financial analysis prompt templates
 ```
 
@@ -255,7 +329,7 @@ npm run build
 Run locally:
 
 ```bash
-FRED_API_KEY=your-key SEC_USER_AGENT_EMAIL=your-email node dist/index.js
+FRED_API_KEY=your-key SEC_USER_AGENT_EMAIL=your-email FINNHUB_API_KEY=your-key node dist/index.js
 ```
 
 ## License

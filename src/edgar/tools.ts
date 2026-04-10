@@ -10,6 +10,8 @@ import {
 import { deduplicateFacts, annualOnly, computeGrowth, detectTrend, summarizeFacts } from "./xbrl.js";
 import { resolveConcept, findConceptData, listAvailableConcepts } from "./concepts.js";
 import { analyzeCompany, compareCompanies } from "./analytics.js";
+import { extractCorporateEvents } from "./events.js";
+import { screenCompanies, listIndustries, SIC_INDUSTRIES } from "./screening.js";
 
 const ANNOTATIONS = {
   readOnlyHint: true,
@@ -438,6 +440,110 @@ export function registerEdgarTools(server: McpServer): void {
       try {
         const response = await searchFilings(query, forms, startDate, endDate, limit, offset);
         return { content: [{ type: "text" as const, text: compactJson(response) }] };
+      } catch (err) {
+        return errorResult(err);
+      }
+    }
+  );
+
+  // ── screen_stocks ─────────────────────────────────────────────────────────
+
+  const industryKeys = Object.keys(SIC_INDUSTRIES).join(", ");
+
+  server.registerTool(
+    "screen_stocks",
+    {
+      title: "Screen Stocks",
+      description:
+        "Discover SEC-registered companies by exchange, industry, name, or " +
+        "financial health score. Fast filters (exchange, name) search 10,000+ " +
+        "companies instantly. Deep filters (industry, health score) require " +
+        "per-company API calls and are slower. " +
+        `Available industries: ${industryKeys}.`,
+      inputSchema: {
+        exchange: z
+          .string()
+          .optional()
+          .describe("Stock exchange filter (NYSE, NASDAQ, AMEX, etc.)"),
+        industry: z
+          .string()
+          .optional()
+          .describe(`SIC industry group: ${industryKeys}`),
+        nameContains: z
+          .string()
+          .optional()
+          .describe("Substring match on company name or ticker"),
+        minHealthScore: z
+          .number()
+          .min(0)
+          .max(100)
+          .optional()
+          .describe("Minimum financial health score (0-100). Requires API calls per company — slower."),
+        limit: z
+          .number()
+          .optional()
+          .default(20)
+          .describe("Max results (default 20, max 50)"),
+      },
+      annotations: ANNOTATIONS,
+    },
+    async ({ exchange, industry, nameContains, minHealthScore, limit }) => {
+      try {
+        const results = await screenCompanies({ exchange, industry, nameContains, minHealthScore, limit });
+        return {
+          content: [{
+            type: "text" as const,
+            text: compactJson({
+              count: results.length,
+              filters: { exchange, industry, nameContains, minHealthScore },
+              availableIndustries: industry ? undefined : listIndustries(),
+              results,
+            }),
+          }],
+        };
+      } catch (err) {
+        return errorResult(err);
+      }
+    }
+  );
+
+  // ── get_corporate_events ──────────────────────────────────────────────────
+
+  server.registerTool(
+    "get_corporate_events",
+    {
+      title: "Get Corporate Events",
+      description:
+        "Get recent 8-K corporate events for a company, classified by event type " +
+        "and significance. Covers M&A, earnings announcements, leadership changes, " +
+        "material agreements, cybersecurity incidents, delisting notices, auditor " +
+        "changes, shareholder votes, and more. Each event includes the SEC item " +
+        "number, human-readable label, category, and significance level (high/medium/low).",
+      inputSchema: {
+        cik: z
+          .string()
+          .describe("Company CIK number (from search_companies)"),
+        significance: z
+          .enum(["high", "medium", "low"])
+          .optional()
+          .describe(
+            "Filter by minimum significance level. " +
+            "'high' = M&A, earnings, leadership, bankruptcies. " +
+            "'medium' = governance, obligations, equity sales. " +
+            "'low' = all events including exhibits."
+          ),
+        limit: z
+          .number()
+          .optional()
+          .default(15)
+          .describe("Max events to return (default 15, max 50)"),
+      },
+      annotations: ANNOTATIONS,
+    },
+    async ({ cik, significance, limit }) => {
+      try {
+        const events = await extractCorporateEvents(cik, { significance, limit });
+        return { content: [{ type: "text" as const, text: compactJson(events) }] };
       } catch (err) {
         return errorResult(err);
       }

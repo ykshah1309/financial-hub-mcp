@@ -98,3 +98,17 @@ export const fredSeriesCache = new TTLCache<any>(21600, 100);
 
 /** FRED observations: 1h TTL, max 50 entries (~5KB each) */
 export const fredObsCache = new TTLCache<any>(3600, 50);
+
+// ── Market data caches (Finnhub) ────────────────────────────────────────────
+
+/** Company profile: 24h TTL, max 50 entries (~2KB each) */
+export const marketProfileCache = new TTLCache<any>(86400, 50);
+
+/** Market/company news: 5min TTL, max 10 entries (~20KB each) */
+export const marketNewsCache = new TTLCache<any>(300, 10);
+
+/** Insider transactions: 1h TTL, max 30 entries (~5KB each) */
+export const insiderCache = new TTLCache<any>(3600, 30);
+
+/** Basic financials (PE, beta, etc.): 1h TTL, max 30 entries (~3KB each) */
+export const basicFinancialsCache = new TTLCache<any>(3600, 30);

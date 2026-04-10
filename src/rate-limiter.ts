@@ -136,3 +136,6 @@ export const edgarLimiter = new RateLimiter(10, 8, 50, 30_000);
 
 /** FRED: 120 req/min = 2 req/s, burst 2, max 30 queued, 30s timeout */
 export const fredLimiter = new RateLimiter(2, 2, 30, 30_000);
+
+/** Finnhub: 30 req/s, burst 20, max 40 queued, 15s timeout */
+export const finnhubLimiter = new RateLimiter(25, 20, 40, 15_000);
