@@ -335,3 +335,7 @@ FRED_API_KEY=your-key SEC_USER_AGENT_EMAIL=your-email FINNHUB_API_KEY=your-key n
 ## License
 
 This MCP server is licensed under the MIT License. This means you are free to use, modify, and distribute the software, subject to the terms and conditions of the MIT License. For more details, please see the LICENSE file in the project repository.
+
+## Badges 
+
+[![MCP Badge](https://lobehub.com/badge/mcp/ykshah1309-financial-hub-mcp)](https://lobehub.com/mcp/ykshah1309-financial-hub-mcp)
