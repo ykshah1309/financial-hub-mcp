@@ -1,6 +1,12 @@
 src/
+test/
 test-live.mjs
 test-results.txt
+hedge-fund-analysis.mjs
+GRILLING_FIX_PLAN.md
+IMPLEMENTATION_PLAN.md
 tsconfig.json
-server.json
+.github/
 .mcpregistry_*
+*.tgz
+coverage/

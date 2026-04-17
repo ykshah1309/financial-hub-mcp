@@ -1,27 +1,58 @@
 {
   "name": "financial-hub-mcp",
-  "version": "1.3.0",
-  "description": "MCP server for financial data — SEC EDGAR filings, XBRL financials, and FRED economic indicators",
+  "version": "1.3.1",
+  "mcpName": "io.github.ykshah1309/financial-hub-mcp",
+  "description": "MCP server for financial data — SEC EDGAR filings, XBRL financials, FRED economic indicators, and Finnhub market data.",
   "license": "MIT",
   "author": "ykshah1309",
-  "mcpName": "io.github.ykshah1309/financial-hub-mcp",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/ykshah1309/financial-hub-mcp.git"
-  },
   "type": "module",
   "bin": {
     "financial-hub-mcp": "dist/index.js"
   },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "server.json",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
-    "test": "vitest run",
-    "lint": "tsc --noEmit"
+    "test": "vitest run --passWithNoTests",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "anthropic",
+    "finance",
+    "financial-data",
+    "sec",
+    "edgar",
+    "xbrl",
+    "fred",
+    "finnhub",
+    "stock-market",
+    "economic-data",
+    "agent",
+    "ai"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ykshah1309/financial-hub-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ykshah1309/financial-hub-mcp/issues"
+  },
+  "homepage": "https://github.com/ykshah1309/financial-hub-mcp#readme",
+  "engines": {
+    "node": ">=20.0.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",

@@ -1,5 +1,25 @@
 node_modules/
 dist/
+coverage/
 *.tsbuildinfo
+*.log
+npm-debug.log*
 .env
+.env.local
+.DS_Store
+.vscode/
+.idea/
+.claude/
+*.tgz
+
+# Local-only test / scratch artifacts (leak endpoints + response shapes)
+test-live.mjs
+test-results.txt
+hedge-fund-analysis.mjs
+
+# Internal planning docs (not for public repo)
+GRILLING_FIX_PLAN.md
+IMPLEMENTATION_PLAN.md
+
+# MCP registry publisher tokens
 .mcpregistry_*

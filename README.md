@@ -332,10 +332,22 @@ Run locally:
 FRED_API_KEY=your-key SEC_USER_AGENT_EMAIL=your-email FINNHUB_API_KEY=your-key node dist/index.js
 ```
 
+## Contributing
+
+Pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development loop, commit style, and PR checklist. By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Security
+
+Please report security issues privately — see [SECURITY.md](SECURITY.md). Do not file public issues for vulnerabilities or credential leaks.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
+
 ## License
 
-This MCP server is licensed under the MIT License. This means you are free to use, modify, and distribute the software, subject to the terms and conditions of the MIT License. For more details, please see the LICENSE file in the project repository.
+MIT — see [LICENSE](LICENSE).
 
-## Badges 
+## Badges
 
 [![MCP Badge](https://lobehub.com/badge/mcp/ykshah1309-financial-hub-mcp)](https://lobehub.com/mcp/ykshah1309-financial-hub-mcp)
